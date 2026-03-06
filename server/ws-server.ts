@@ -171,7 +171,7 @@ async function persistEvent(msg: WSMessage) {
         const token = p.token as Record<string, unknown>;
         await db`INSERT INTO tokens (id, session_id, emoji, color, x, y, label)
                  VALUES (${token.id as string}, ${token.sessionId as string}, ${token.emoji as string},
-                         ${token.color as string}, ${token.x as number}, ${token.y as number}, ${token.label as string || ''})
+                         ${token.color as string}, ${token.x as number}, ${token.y as number}, ${(token.label as string) ?? ''})
                  ON CONFLICT DO NOTHING`;
         break;
       }

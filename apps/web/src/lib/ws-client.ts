@@ -11,7 +11,7 @@ export function useSessionWS(slug: string, role: 'gm' | 'player', onMessage: (ms
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const connect = useCallback(() => {
-    ws.current = new WebSocket(`${WS_URL}/ws?slug=${slug}&role=${role}`);
+    ws.current = new WebSocket(`${WS_URL}/ws?slug=${encodeURIComponent(slug)}&role=${encodeURIComponent(role)}`);
 
     ws.current.onmessage = (e) => {
       try { onMessage(JSON.parse(e.data)); } catch { /* ignore parse errors */ }

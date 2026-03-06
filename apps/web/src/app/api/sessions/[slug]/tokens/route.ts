@@ -24,6 +24,7 @@ export async function POST(
   }
 
   const body = await req.json();
+  // Allow client-provided ID for immediate WS event referencing; fallback to server-generated UUID
   const id = body.id || uuidv4();
 
   const result = await db`
