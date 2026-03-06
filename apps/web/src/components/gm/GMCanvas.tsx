@@ -163,7 +163,7 @@ export default function GMCanvas({ session, send }: GMCanvasProps) {
   selectedBoxIdRef.current = selectedBoxId;
 
   /* ── Notification helper ── */
-  const notifTimer = useRef<ReturnType<typeof setTimeout>>();
+  const notifTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const showNotif = useCallback((msg: string) => {
     setNotification(msg);
     clearTimeout(notifTimer.current);

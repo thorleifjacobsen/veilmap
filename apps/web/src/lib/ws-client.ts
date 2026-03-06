@@ -8,7 +8,7 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
 
 export function useSessionWS(slug: string, role: 'gm' | 'player', onMessage: (msg: WSMessage) => void) {
   const ws = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const connect = useCallback(() => {
     ws.current = new WebSocket(`${WS_URL}/ws?slug=${encodeURIComponent(slug)}&role=${encodeURIComponent(role)}`);
