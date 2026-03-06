@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { use, useState, useCallback, useRef, useEffect } from 'react';
 import type { Session, WSMessage, FullStatePayload, FogPaintPayload, FogSnapshotPayload } from '@/types';
 import { useSessionWS } from '@/lib/ws-client';
 import { createFogCanvas, loadFogFromBase64, paintReveal, paintHide, revealBox as revealBoxFog, MAP_W, MAP_H } from '@/lib/fog-engine';
 import PlayerCanvas from '@/components/player/PlayerCanvas';
 import PrepScreen from '@/components/player/PrepScreen';
 
-export default function PlayPage({ params }: { params: { slug: string } }) {
-  const { slug } = params;
+export default function PlayPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const fogCanvasRef = useRef<HTMLCanvasElement | null>(null);

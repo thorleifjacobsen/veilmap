@@ -6,14 +6,14 @@ import { v4 as uuidv4 } from 'uuid';
 // POST /api/sessions/[slug]/boxes — create a box
 export async function POST(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length) {
@@ -53,14 +53,14 @@ export async function POST(
 // PATCH /api/sessions/[slug]/boxes — update box (with boxId in body)
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { slug } = params;
+  const { slug } = await params;
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length || sessionRow[0].owner_id !== session.user.id) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -94,14 +94,14 @@ export async function PATCH(
 // DELETE /api/sessions/[slug]/boxes — delete box (with boxId in body)
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { slug } = params;
+  const { slug } = await params;
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length || sessionRow[0].owner_id !== session.user.id) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });

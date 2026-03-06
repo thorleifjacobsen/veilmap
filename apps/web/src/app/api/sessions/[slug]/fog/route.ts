@@ -5,14 +5,14 @@ import { auth } from '@/lib/auth';
 // PUT /api/sessions/[slug]/fog — save fog snapshot
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length) {

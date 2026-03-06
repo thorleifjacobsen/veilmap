@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { use, useState, useCallback, useEffect } from 'react';
 import type { Session, WSMessage, FullStatePayload } from '@/types';
 import { useSessionWS } from '@/lib/ws-client';
 import GMCanvas from '@/components/gm/GMCanvas';
 
-export default function GMPage({ params }: { params: { slug: string } }) {
-  const { slug } = params;
+export default function GMPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 

@@ -5,9 +5,9 @@ import { auth } from '@/lib/auth';
 // GET /api/sessions/[slug] — get full session with boxes and tokens
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessions = await db`
     SELECT s.*,
@@ -53,14 +53,14 @@ export async function GET(
 // PATCH /api/sessions/[slug] — update session settings
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { slug } = params;
+  const { slug } = await params;
 
   // Verify ownership
   const existing = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
@@ -92,14 +92,14 @@ export async function PATCH(
 // DELETE /api/sessions/[slug] — delete session
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { slug } = params;
+  const { slug } = await params;
 
   // Verify ownership
   const existing = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
