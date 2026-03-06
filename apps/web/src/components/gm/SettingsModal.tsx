@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useRef, useCallback } from 'react';
 
 interface SettingsModalProps {
   open: boolean;

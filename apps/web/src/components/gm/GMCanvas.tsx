@@ -16,11 +16,9 @@ import {
   paintHide,
   revealBox as revealBoxFog,
   fogToBase64,
-  loadFogFromBase64,
 } from '@/lib/fog-engine';
 import {
   screenToMap,
-  mapToScreen,
   zoomAt,
   fitToContainer,
   applyViewport,
