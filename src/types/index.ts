@@ -74,6 +74,7 @@ export type SSEEventType =
   | 'session:settings'
   | 'session:blackout'
   | 'camera:move'
+  | 'objects:update'
   | 'ping';
 
 export interface SSEEvent {

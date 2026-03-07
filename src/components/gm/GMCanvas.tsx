@@ -104,6 +104,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [notification, setNotification] = useState('');
   const [hint, setHint] = useState('');
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [zoomModalOpen, setZoomModalOpen] = useState(false);
   const [measureInfo, setMeasureInfo] = useState<string | null>(null);
   const [blackoutActive, setBlackoutActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -1403,6 +1404,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           setObjects(updated);
           drawMap();
           showNotif(`Added: ${newObj.name}`);
+          // Broadcast objects to player
+          fetch(`/api/sessions/${slug}/fog`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ objects: updated }),
+          }).catch(() => {});
         };
         img.src = src;
       };
@@ -1419,8 +1426,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       objectsRef.current = updated;
       setObjects(updated);
       drawMap();
+      // Broadcast objects to player
+      fetch(`/api/sessions/${slug}/fog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objects: updated }),
+      }).catch(() => {});
     },
-    [drawMap],
+    [drawMap, slug],
   );
 
   const handleObjectDelete = useCallback(
@@ -1430,8 +1443,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       objectImagesRef.current.delete(id);
       setObjects(updated);
       drawMap();
+      // Broadcast objects to player
+      fetch(`/api/sessions/${slug}/fog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objects: updated }),
+      }).catch(() => {});
     },
-    [drawMap],
+    [drawMap, slug],
   );
 
   const handleObjectReorder = useCallback(
@@ -1447,8 +1466,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       objectsRef.current = sorted;
       setObjects([...sorted]);
       drawMap();
+      // Broadcast objects to player
+      fetch(`/api/sessions/${slug}/fog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objects: sorted }),
+      }).catch(() => {});
     },
-    [drawMap],
+    [drawMap, slug],
   );
 
   const handleRevealAll = useCallback(() => {
@@ -1591,15 +1616,16 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           Veil<span style={{ color: '#e05c2a', fontStyle: 'normal' }}>Map</span>
         </div>
         <div className="flex items-center gap-[7px]">
-          <span
-            className="px-1 text-[.58rem] tracking-[.05em]"
-            style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
+          <button
+            className="cursor-pointer rounded border px-2 py-0.5 text-[.68rem] font-medium tracking-[.05em] transition-all hover:border-[#c8963e] hover:text-[#c8963e]"
+            style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.5)', borderColor: 'rgba(200,150,62,.15)', background: 'transparent' }}
+            onClick={() => setZoomModalOpen(true)}
           >
             {zoomPercent}%
-          </span>
+          </button>
           {blackoutActive && (
             <span
-              className="px-1.5 py-0.5 text-[.52rem] tracking-[.06em] rounded"
+              className="px-1.5 py-0.5 text-[.62rem] tracking-[.06em] rounded"
               style={{ fontFamily: "'Cinzel',serif", background: 'rgba(224,92,42,.2)', color: '#e05c2a', border: '1px solid rgba(224,92,42,.3)' }}
             >
               ⬛ BLACKOUT
@@ -1651,7 +1677,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           {/* Measure info */}
           {measureInfo && (
             <div
-              className="pointer-events-none fixed left-1/2 top-[44px] z-[500] -translate-x-1/2 rounded border px-3 py-1 text-[.65rem] tracking-[.07em]"
+              className="pointer-events-none fixed left-1/2 top-[44px] z-[500] -translate-x-1/2 rounded border px-3 py-1 text-[.75rem] tracking-[.07em]"
               style={{
                 fontFamily: "'Cinzel',serif",
                 background: 'rgba(7,6,12,.95)',
@@ -1666,7 +1692,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           {/* Hint */}
           {hint && (
             <div
-              className="pointer-events-none fixed bottom-[38px] left-1/2 z-[400] -translate-x-1/2 rounded border px-3 py-1 text-[.6rem] tracking-[.05em]"
+              className="pointer-events-none fixed bottom-[38px] left-1/2 z-[400] -translate-x-1/2 rounded border px-3 py-1 text-[.7rem] tracking-[.05em]"
               style={{
                 fontFamily: "'Cinzel',serif",
                 background: 'rgba(7,6,12,.88)',
@@ -1701,7 +1727,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
       {/* Notification toast */}
       <div
-        className="pointer-events-none fixed bottom-[14px] left-1/2 z-[9999] whitespace-nowrap rounded border px-3.5 py-1.5 text-[.65rem] tracking-[.07em] transition-transform duration-300"
+        className="pointer-events-none fixed bottom-[14px] left-1/2 z-[9999] whitespace-nowrap rounded border px-3.5 py-1.5 text-[.75rem] tracking-[.07em] transition-transform duration-300"
         style={{
           fontFamily: "'Cinzel',serif",
           background: '#100f18',
@@ -1740,16 +1766,79 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         onClose={() => setContextMenu((prev) => ({ ...prev, open: false }))}
         onAction={handleCtxAction}
       />
+      {zoomModalOpen && (
+        <div className="fixed inset-0 z-[800] flex items-center justify-center" onClick={() => setZoomModalOpen(false)}>
+          <div
+            className="rounded-lg border p-5 shadow-2xl"
+            style={{ background: '#100f18', borderColor: 'rgba(200,150,62,.3)', minWidth: 200 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 text-center text-[.7rem] font-semibold tracking-[.1em]" style={{ fontFamily: "'Cinzel',serif", color: '#c8963e' }}>
+              ZOOM
+            </div>
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center text-[1.2rem] font-bold" style={{ color: '#c8963e', fontFamily: "'Cinzel',serif" }}>
+                {zoomPercent}%
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="500"
+                value={zoomPercent}
+                onChange={(e) => {
+                  const newZoom = parseInt(e.target.value, 10);
+                  const wrap = wrapRef.current;
+                  if (!wrap) return;
+                  const cx = wrap.offsetWidth / 2, cy = wrap.offsetHeight / 2;
+                  const newScale = newZoom / 100;
+                  const oldScale = vpRef.current.scale;
+                  const factor = newScale / oldScale;
+                  vpRef.current = zoomAt(vpRef.current, cx, cy, factor);
+                  setZoomPercent(Math.round(vpRef.current.scale * 100));
+                  redrawAll();
+                }}
+                className="h-48 w-3 appearance-none rounded-full"
+                style={{
+                  writingMode: 'vertical-lr' as React.CSSProperties['writingMode'],
+                  direction: 'rtl',
+                  accentColor: '#c8963e',
+                  background: 'rgba(200,150,62,.15)',
+                }}
+              />
+              <div className="flex gap-2">
+                <button
+                  className="rounded border px-3 py-1 text-[.62rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
+                  style={{ fontFamily: "'Cinzel',serif", borderColor: 'rgba(200,150,62,.2)', color: '#c8963e' }}
+                  onClick={() => {
+                    const wrap = wrapRef.current;
+                    if (!wrap) return;
+                    vpRef.current = fitToContainer(MAP_W, MAP_H, wrap.offsetWidth, wrap.offsetHeight);
+                    setZoomPercent(Math.round(vpRef.current.scale * 100));
+                    redrawAll();
+                  }}
+                >
+                  Fit
+                </button>
+                <button
+                  className="rounded border px-3 py-1 text-[.62rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
+                  style={{ fontFamily: "'Cinzel',serif", borderColor: 'rgba(200,150,62,.2)', color: '#c8963e' }}
+                  onClick={() => setZoomModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── Static draw helpers ──
-
 function HeaderBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
     <button
-      className="rounded border px-2.5 py-1 text-[.58rem] tracking-[.05em] transition-all hover:border-[#c8963e] hover:text-[#c8963e]"
+      className="rounded border px-2.5 py-1 text-[.68rem] font-medium tracking-[.05em] transition-all hover:border-[#c8963e] hover:text-[#c8963e]"
       style={{
         fontFamily: "'Cinzel',serif",
         borderColor: 'rgba(200,150,62,.2)',

@@ -70,7 +70,7 @@ export default function Toolbar({
               onClick={() => onBrushChange(b.radius)}
             >
               <span
-                className="text-[.38rem] w-3 text-right"
+                className="text-[.46rem] w-3 text-right"
                 style={{ fontFamily: "'Cinzel',serif", color: brushRadius === b.radius ? '#c8963e' : 'rgba(212,196,160,.3)' }}
               >
                 {b.key}
@@ -167,7 +167,7 @@ function ToolGroup({ label, children }: { label: string; children: React.ReactNo
       style={{ borderBottom: '1px solid rgba(200,150,62,.2)' }}
     >
       <div
-        className="text-[.42rem] uppercase tracking-[.1em]"
+        className="text-[.5rem] font-semibold uppercase tracking-[.1em]"
         style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
       >
         {label}
@@ -202,14 +202,14 @@ function ToolBtn({
     >
       {icon}
       <span
-        className="text-[.42rem] tracking-[.04em]"
-        style={{ fontFamily: "'Cinzel',serif", opacity: 0.65 }}
+        className="text-[.5rem] tracking-[.04em]"
+        style={{ fontFamily: "'Cinzel',serif", opacity: 0.8 }}
       >
         {label}
       </span>
       {kbd && (
         <span
-          className="absolute right-[3px] top-[2px] text-[.40rem]"
+          className="absolute right-[3px] top-[2px] text-[.48rem]"
           style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
         >
           {kbd}

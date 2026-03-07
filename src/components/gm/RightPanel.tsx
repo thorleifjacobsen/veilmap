@@ -144,13 +144,13 @@ export default function RightPanel({
           Objects{' '}
           <span className="ml-auto flex items-center gap-1">
             <span
-              className="text-[.5rem]"
+              className="text-[.58rem]"
               style={{ color: 'rgba(212,196,160,.4)' }}
             >
               {objects.length}
             </span>
             <span
-              className="cursor-pointer text-[.5rem]"
+              className="cursor-pointer text-[.58rem]"
               style={{ color: '#c8963e' }}
               onClick={() => objectInputRef.current?.click()}
             >
@@ -183,7 +183,7 @@ export default function RightPanel({
           >
             <div className="mb-0.5 text-base">🖼️</div>
             <div
-              className="text-[.55rem] tracking-[.04em]"
+              className="text-[.62rem] tracking-[.04em]"
               style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
             >
               DROP IMAGES / GIFS
@@ -198,7 +198,7 @@ export default function RightPanel({
             {sortedObjects.map((obj) => (
               <div
                 key={obj.id}
-                className="mb-0.5 flex items-center gap-1 rounded border px-1 py-0.5 text-[.65rem] transition-all hover:bg-[rgba(200,150,62,.05)]"
+                className="mb-0.5 flex items-center gap-1 rounded border px-1 py-0.5 text-[.72rem] transition-all hover:bg-[rgba(200,150,62,.05)]"
                 style={{ borderColor: 'transparent', opacity: obj.visible ? 1 : 0.4 }}
               >
                 {/* Thumbnail */}
@@ -222,7 +222,7 @@ export default function RightPanel({
                   />
                 ) : (
                   <span
-                    className="min-w-0 flex-1 cursor-text overflow-hidden text-ellipsis whitespace-nowrap text-[.6rem]"
+                    className="min-w-0 flex-1 cursor-text overflow-hidden text-ellipsis whitespace-nowrap text-[.68rem]"
                     onDoubleClick={() => startEditName(obj)}
                   >
                     {obj.name}
@@ -255,7 +255,7 @@ export default function RightPanel({
               </div>
             ))}
             <div
-              className="mt-1 cursor-pointer rounded border border-dashed p-1 text-center text-[.5rem] transition-all hover:border-[#c8963e]"
+              className="mt-1 cursor-pointer rounded border border-dashed p-1 text-center text-[.58rem] transition-all hover:border-[#c8963e]"
               style={{ borderColor: 'rgba(200,150,62,.15)', color: 'rgba(212,196,160,.3)' }}
               onClick={() => objectInputRef.current?.click()}
             >
@@ -293,11 +293,11 @@ export default function RightPanel({
                 className="h-[7px] w-[7px] flex-shrink-0 rounded-sm"
                 style={{ background: b.color || TYPE_COLORS[b.type] || '#c8963e' }}
               />
-              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[.68rem]">
+              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[.75rem]">
                 {b.name}
               </span>
               <span
-                className="text-[.48rem]"
+                className="text-[.55rem]"
                 style={{
                   fontFamily: "'Cinzel',serif",
                   color: b.revealed ? 'rgba(200,150,62,.5)' : 'rgba(212,196,160,.4)',
@@ -359,7 +359,7 @@ export default function RightPanel({
 function MiniBtn({ children, title, onClick }: { children: React.ReactNode; title: string; onClick: () => void }) {
   return (
     <button
-      className="flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded text-[.5rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
+      className="flex h-[18px] w-[18px] cursor-pointer items-center justify-center rounded text-[.56rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
       style={{ color: '#d4c4a0' }}
       title={title}
       aria-label={title}
@@ -384,7 +384,7 @@ function PanelSection({ children, grow }: { children: React.ReactNode; grow?: bo
 function PanelTitle({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="mb-1.5 flex items-center gap-1 text-[.57rem] uppercase tracking-[.12em]"
+      className="mb-1.5 flex items-center gap-1 text-[.65rem] font-semibold uppercase tracking-[.12em]"
       style={{ fontFamily: "'Cinzel',serif", color: '#c8963e' }}
     >
       <span
@@ -407,7 +407,7 @@ function SmallBtn({
 }) {
   return (
     <button
-      className="mt-1 w-full cursor-pointer rounded border p-1 text-[.56rem] tracking-[.07em] transition-colors hover:bg-[rgba(200,150,62,.18)]"
+      className="mt-1 w-full cursor-pointer rounded border p-1 text-[.64rem] tracking-[.07em] transition-colors hover:bg-[rgba(200,150,62,.18)]"
       style={{
         fontFamily: "'Cinzel',serif",
         borderColor: red ? 'rgba(224,92,42,.3)' : 'rgba(200,150,62,.2)',

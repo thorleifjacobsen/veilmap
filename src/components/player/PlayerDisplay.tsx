@@ -287,13 +287,30 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           // TODO: render ping animation
           break;
         }
+        case 'objects:update': {
+          const p = event.payload as { objects: MapObject[] };
+          loadObjectImages(p.objects);
+          break;
+        }
       }
     }
 
     connect();
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        // Force reconnect when tab becomes visible again
+        eventSource?.close();
+        clearTimeout(reconnectTimer);
+        connect();
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       clearTimeout(reconnectTimer);
       eventSource?.close();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
