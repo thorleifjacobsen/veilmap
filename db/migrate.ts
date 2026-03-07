@@ -1,5 +1,6 @@
 // db/migrate.ts
 // Run with: npx tsx db/migrate.ts
+// Uses ESM-compatible __dirname via fileURLToPath
 
 import postgres from 'postgres';
 import { readFileSync } from 'fs';
