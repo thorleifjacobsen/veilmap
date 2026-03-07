@@ -19,6 +19,7 @@ interface ToolbarProps {
   onResetFog: () => void;
   onRevealAllFog: () => void;
   onGridRightClick?: (e: React.MouseEvent) => void;
+  onMeasureRightClick?: (e: React.MouseEvent) => void;
   snapToGrid?: boolean;
   onSnapToGridToggle?: () => void;
 }
@@ -33,6 +34,7 @@ export default function Toolbar({
   onResetFog,
   onRevealAllFog,
   onGridRightClick,
+  onMeasureRightClick,
 }: ToolbarProps) {
   return (
     <div
@@ -148,6 +150,7 @@ export default function Toolbar({
           kbd="M"
           active={activeTool === 'measure'}
           onClick={() => onToolChange('measure')}
+          onContextMenu={onMeasureRightClick ? (e) => { e.preventDefault(); onMeasureRightClick(e); } : undefined}
         />
         <ToolBtn
           icon={<GridIcon />}

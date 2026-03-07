@@ -130,6 +130,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [gridSize, setGridSize] = useState(session.grid_size || 32);
   const [gridColor, setGridColor] = useState(session.grid_color || '#c8963e');
   const [gridOpacity, setGridOpacity] = useState(session.grid_opacity ?? 0.25);
+  const [measurementUnit, setMeasurementUnit] = useState<'feet' | 'meters'>((session.measurement_unit as 'feet' | 'meters') || 'feet');
+  const [measureMenuOpen, setMeasureMenuOpen] = useState<{ x: number; y: number } | null>(null);
   const [prepMessage, setPrepMessage] = useState(session.prep_message || 'Preparing next scene…');
   const [sessionName, setSessionName] = useState(session.name);
   const [boxes, setBoxes] = useState<Box[]>(session.boxes || []);
@@ -189,6 +191,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const gmFogOpacityRef = useRef(session.gm_fog_opacity);
   const brushRadiusRef = useRef(36);
   const showGridRef = useRef(session.show_grid ?? false);
+  const measurementUnitRef = useRef<'feet' | 'meters'>((session.measurement_unit as 'feet' | 'meters') || 'feet');
   const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
   const cameraRef = useRef<CameraViewport>(
     session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null
@@ -215,6 +218,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { gmFogOpacityRef.current = gmFogOpacity; }, [gmFogOpacity]);
   useEffect(() => { brushRadiusRef.current = brushRadius; }, [brushRadius]);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
+  useEffect(() => { measurementUnitRef.current = measurementUnit; }, [measurementUnit]);
   useEffect(() => { blackoutActiveRef.current = blackoutActive; }, [blackoutActive]);
   useEffect(() => { selectedObjectIdRef.current = selectedObjectId; }, [selectedObjectId]);
   useEffect(() => { snapToGridRef.current = snapToGrid; }, [snapToGrid]);
@@ -467,8 +471,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.fill();
       const dist = Math.sqrt((mp.x - ms.sx) ** 2 + (mp.y - ms.sy) ** 2) / vp.scale;
       const gs = gridSizeRef.current;
-      const ft = Math.round((dist / gs) * 5);
-      setMeasureInfo(`${ft} ft · ${Math.round(dist / gs)} sq`);
+      const sq = Math.round(dist / gs);
+      if (measurementUnitRef.current === 'meters') {
+        const m = Math.round((dist / gs) * 1.5);
+        setMeasureInfo(`${m} m · ${sq} sq`);
+      } else {
+        const ft = Math.round((dist / gs) * 5);
+        setMeasureInfo(`${ft} ft · ${sq} sq`);
+      }
     } else {
       setMeasureInfo(null);
     }
@@ -1874,6 +1884,22 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     setGridMenuOpen({ x: e.clientX, y: e.clientY });
   }, []);
 
+  const handleMeasureRightClick = useCallback((e: React.MouseEvent) => {
+    setMeasureMenuOpen({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  const changeMeasurementUnit = useCallback((unit: 'feet' | 'meters') => {
+    setMeasurementUnit(unit);
+    measurementUnitRef.current = unit;
+    setMeasureMenuOpen(null);
+    showNotif(`Measurement: ${unit === 'feet' ? 'Feet (5 ft/sq)' : 'Meters (1.5 m/sq)'}`);
+    fetch(`/api/sessions/${slug}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ measurement_unit: unit }),
+    }).catch(() => {});
+  }, [slug, showNotif]);
+
   const openLibrary = useCallback(async () => {
     try {
       const res = await fetch('/api/library');
@@ -1896,6 +1922,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [gridMenuOpen]);
+
+  // Close measure context menu on click-away
+  useEffect(() => {
+    if (!measureMenuOpen) return;
+    const close = () => setMeasureMenuOpen(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [measureMenuOpen]);
 
   const handleObjectAdd = useCallback(
     async (file: File) => {
@@ -2177,6 +2211,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           onResetFog={handleResetFog}
           onRevealAllFog={handleRevealAllFog}
           onGridRightClick={handleGridRightClick}
+          onMeasureRightClick={handleMeasureRightClick}
           snapToGrid={snapToGrid}
           onSnapToGridToggle={() => { setSnapToGrid(v => { snapToGridRef.current = !v; return !v; }); }}
         />
@@ -2359,6 +2394,30 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
               style={{ height: 4 }}
             />
             <span className="text-[.6rem] text-[#8a7a5a] w-8 text-right">{Math.round(gridOpacity * 100)}%</span>
+          </div>
+        </div>
+      )}
+
+      {/* Measurement unit popover */}
+      {measureMenuOpen && (
+        <div
+          className="fixed z-[900] rounded border shadow-lg py-1"
+          style={{ left: measureMenuOpen.x, top: measureMenuOpen.y, background: '#100f18', borderColor: 'rgba(200,150,62,.3)', minWidth: 160 }}
+        >
+          <div className="px-3 py-1 text-[.55rem] uppercase tracking-[.1em]" style={{ fontFamily: "'Cinzel',serif", color: '#8a7a5a' }}>Measurement Unit</div>
+          <div
+            className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+            style={{ fontFamily: "'Cinzel',serif", color: measurementUnit === 'feet' ? '#c8963e' : '#d4c4a0' }}
+            onClick={() => changeMeasurementUnit('feet')}
+          >
+            {measurementUnit === 'feet' ? '✓ ' : '  '}Feet (5 ft / square)
+          </div>
+          <div
+            className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+            style={{ fontFamily: "'Cinzel',serif", color: measurementUnit === 'meters' ? '#c8963e' : '#d4c4a0' }}
+            onClick={() => changeMeasurementUnit('meters')}
+          >
+            {measurementUnit === 'meters' ? '✓ ' : '  '}Meters (1.5 m / square)
           </div>
         </div>
       )}
