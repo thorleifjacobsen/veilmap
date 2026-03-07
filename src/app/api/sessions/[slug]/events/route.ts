@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { subscribe, getFogState, getCameraState, setCameraState, getBlackoutState, getObjectsState, setObjectsState } from '@/lib/sse';
+import { subscribe, getFogState, getCameraState, setCameraState, getBlackoutState, getObjectsState } from '@/lib/sse';
 import type { SSEEvent } from '@/types';
 
 // GET /api/sessions/[slug]/events — SSE endpoint for player display
@@ -83,12 +83,10 @@ export async function GET(
       // Initialize in-memory camera from DB on first connect
       if (!memCamera && camera) setCameraState(slug, camera);
       const blackout = getBlackoutState(slug);
-      // Use in-memory objects if available, otherwise from DB
-      let objects = getObjectsState(slug);
-      if (objects.length === 0 && sessionData.objects.length > 0) {
-        objects = sessionData.objects;
-        setObjectsState(slug, objects);
-      }
+      // Use in-memory objects if GM has already set them, otherwise fall back to DB
+      const memObjects = getObjectsState(slug);
+      const objects = memObjects.length > 0 ? memObjects : sessionData.objects;
+      // Always send DB objects as the canonical list so reconnects are consistent
       const fullState: SSEEvent = {
         type: 'state:full',
         payload: { session: { ...sessionData, objects }, fogPng, objects, camera, blackout, grid: { show: s.show_grid, size: s.grid_size } },

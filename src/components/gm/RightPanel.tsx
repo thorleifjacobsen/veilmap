@@ -243,7 +243,7 @@ export default function RightPanel({
                 {/* Minimal controls — visibility toggles */}
                 <MiniBtn
                   title={obj.playerVisible === false ? 'Show on Player' : 'Hide on Player'}
-                  onClick={() => onObjectUpdate(obj.id, { playerVisible: obj.playerVisible === false ? true : false })}
+                  onClick={() => onObjectUpdate(obj.id, { playerVisible: !obj.playerVisible })}
                 >
                   <span style={{ opacity: obj.playerVisible === false ? 0.3 : 1 }}>📺</span>
                 </MiniBtn>
@@ -359,7 +359,7 @@ export default function RightPanel({
                 <div
                   className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
                   style={{ fontFamily: "'Cinzel',serif", color: '#d4c4a0' }}
-                  onClick={() => { onObjectUpdate(obj.id, { playerVisible: obj.playerVisible === false ? true : false }); setObjectMenuId(null); }}
+                  onClick={() => { onObjectUpdate(obj.id, { playerVisible: !obj.playerVisible }); setObjectMenuId(null); }}
                 >
                   {obj.playerVisible === false ? '📺 Show on Player' : '📺 Hide on Player'}
                 </div>

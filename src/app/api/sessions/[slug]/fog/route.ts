@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { auth } from '@/lib/auth';
 import { broadcast, setFogState, setCameraState, setBlackoutState, setObjectsState } from '@/lib/sse';
+import type { MapObject } from '@/types';
 
 // PUT /api/sessions/[slug]/fog — save fog snapshot and broadcast
 export async function PUT(
@@ -115,7 +116,7 @@ export async function POST(
     await db.mapObject.deleteMany({ where: { session_id: sessionId } });
     if (body.objects.length > 0) {
       await db.mapObject.createMany({
-        data: body.objects.map((o: { id: string; name: string; src: string; x: number; y: number; w: number; h: number; rotation?: number; zIndex: number; visible: boolean; playerVisible?: boolean; locked: boolean }) => ({
+        data: body.objects.map((o: MapObject) => ({
           id: o.id,
           session_id: sessionId,
           name: o.name,

@@ -22,28 +22,33 @@ The GM controls one browser window; a second URL on the projector shows players 
 - `+` / `-` keys to zoom in/out
 - Clickable zoom percentage opens zoom slider modal
 - `⌂ Fit` button to reset view
-- Grid overlay toggle (`G` key)
+- Grid overlay toggle (`G` key) — visible on both GM and player views
 - Right-click grid button for submenu: toggle grid, snap objects to grid, draw grid size
+- Clean dark slate on start — no default map, user uploads their base map as an object
 
 ### Fog of War
-- Reveal tool (`R`) — paint to clear fog with smooth radial gradient
-- Hide tool (`H`) — paint fog back
+- Reveal tool (`R`) — paint to clear fog with smooth 7-stop radial gradient
+- Hide tool (`H`) — paint fog back with soft-edge gradient
 - Reset fog — covers entire map
 - Brush sizes 1–4 (keys `1` `2` `3` `4`)
 - Undo (`Ctrl+Z` / `Cmd+Z`) — 20-level stack
 - Interpolated strokes — smooth fog paint even when zoomed out
 - Auto-reveal: painting inside an autoReveal box reveals the entire room
 - Fog snapshots saved every 10s + on mouse release
+- Wispy fog texture — subtle noise overlay on fog for atmospheric look
+- Animated reveal — ease-out cubic expanding circles (350ms)
 
 ### Map Objects
 - Upload multiple images (PNG, JPG, WebP, GIF) as layered objects
 - Photoshop-style layer panel with z-index ordering
-- Per-object: rename (double-click), visibility toggle (GM), right-click context menu for lock/reorder/delete
-- Select objects on canvas with transform handles — move, scale from corners (12px handles)
-- Grid snapping: center-snap objects to grid cells (right-click grid → Snap Objects to Grid)
+- Per-object: rename (double-click), GM visibility toggle (👁), player visibility toggle (📺), right-click context menu for lock/reorder/delete
+- Select objects on canvas with transform handles — move, scale from corners (9px handles), rotation support
+- Grid snapping: center-snap objects to grid cell centers (right-click grid → Snap Objects to Grid)
 - Draw Grid Size: draw a rectangle matching a known grid cell to calibrate grid (shows green preview with px size)
 - GIF support for animated elements (water, fire, etc.)
-- Objects synced to player display in real-time via SSE
+- Objects persisted in database (`map_objects` table) — survive page reload
+- Objects synced to player display in real-time via SSE `objects:update` event
+- Dual visibility: objects can be visible to GM only, player only, both, or neither
 
 ### Camera Viewport
 - GM controls a draggable/resizable camera rectangle (`C` key)
@@ -52,6 +57,7 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Player display shows exactly what's inside the camera at 100% screen
 - Strict clipping: only camera area content is shown, black bars everywhere else
 - Area outside camera dimmed in GM view
+- Camera persisted in database (`camera_x/y/w/h` on session) — survives page reload
 
 ### Polygon Rooms (Meta Boxes)
 - Draw polygon rooms (`B` key) — click to place vertices, grid-snapped
@@ -71,28 +77,33 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Fullscreen, no UI chrome
 - Shows exactly what's inside the GM's camera viewport
 - Strict camera clipping with black bars for non-matching areas
-- Map objects rendered with z-index ordering
-- Fog at full opacity
+- Map objects rendered with z-index ordering (player-visible only)
+- Fog at full opacity with wispy texture
 - Vignette overlay for atmosphere
+- Grid overlay when enabled by GM
+- Ping animations visible on player display
 - Blackout mode (`X` key) — instant black screen with custom message
 - Prep mode with animated runes overlay
 - SSE connection with auto-reconnect on visibility change (tab focus)
 - Right-click disabled
+- Objects reloaded properly on tab visibility change
 
 ### Measurement
 - Ruler tool (`M` key)
 - Shows distance in feet and grid squares
 
 ### Ping & Torch
-- Ping (`P` key) — animated expanding rings visible to players
+- Ping (`P` key) — animated expanding rings visible on both GM and player views
 - Torch — flickering light effect on map
 
 ### Sessions & Persistence
 - Dashboard to create, list, delete sessions
 - Unique slug URLs (e.g. `/gm/dark-forest-42`)
-- Free users: session in RAM only, export/import as `.veilmap.json`
+- All sessions: objects and camera persisted in database
+- Free users: fog in RAM only, export/import as `.veilmap.json`
 - Pro users: fog + map persisted to database, server-side uploads
 - 📺 Player button copies player URL to clipboard
+- Grid visibility setting persisted in database
 
 ### Auth
 - Register with email + password
@@ -125,9 +136,10 @@ Shortcuts shown as tooltips on hover in the toolbar.
 
 ## Data Model
 
-Four tables: `users`, `sessions`, `boxes`, `tokens`.
+Five tables: `users`, `sessions`, `boxes`, `tokens`, `map_objects`.
 
 - **users** — email, password hash, is_pro flag
-- **sessions** — slug, name, owner, map URL, fog snapshot, prep mode, display settings
+- **sessions** — slug, name, owner, map URL, fog snapshot, prep mode, display settings, camera viewport (x/y/w/h), show_grid
 - **boxes** — position, size, polygon points (JSON), type, name, color, notes, revealed state
 - **tokens** — emoji, color, position, label
+- **map_objects** — name, src (data URL), position, size, rotation, z_index, visible (GM), player_visible, locked
