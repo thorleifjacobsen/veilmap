@@ -3,7 +3,7 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { Session, SSEEvent, FogPaintPayload, FogSnapshotPayload, FullStatePayload, MapObject, CameraViewport, BlackoutPayload, CameraMovePayload } from '@/types';
 import { MAP_W, MAP_H, createFogCanvas, paintHide, revealBox as revealBoxFog, loadFogFromBase64, animateReveal } from '@/lib/fog-engine';
-import { applyViewport, type Viewport } from '@/lib/viewport';
+import { applyViewport, hexToRgba, type Viewport } from '@/lib/viewport';
 import PrepScreen from './PrepScreen';
 
 export default function PlayerDisplay({ slug }: { slug: string }) {
@@ -148,11 +148,7 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       const gs = gridRef.current.size;
       const gc = gridRef.current.color || '#c8963e';
       const go = gridRef.current.opacity ?? 0.25;
-      // Parse hex color to RGB
-      const rr = parseInt(gc.slice(1, 3), 16);
-      const gg = parseInt(gc.slice(3, 5), 16);
-      const bb = parseInt(gc.slice(5, 7), 16);
-      ctx.strokeStyle = `rgba(${rr},${gg},${bb},${go})`;
+      ctx.strokeStyle = hexToRgba(gc, go);
       ctx.lineWidth = 1;
       for (let x = 0; x <= MAP_W; x += gs) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, MAP_H); ctx.stroke();

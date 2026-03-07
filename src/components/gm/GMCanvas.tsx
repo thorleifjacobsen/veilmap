@@ -27,6 +27,7 @@ import {
   applyViewport,
   clampViewport,
   clampToMap,
+  hexToRgba,
   type Viewport,
 } from '@/lib/viewport';
 import Toolbar from './Toolbar';
@@ -2350,11 +2351,7 @@ function HeaderBtn({ children, onClick }: { children: React.ReactNode; onClick: 
 }
 
 function drawGridLines(c: CanvasRenderingContext2D, gridSize: number, scale: number, color: string, opacity: number) {
-  // Parse hex color to RGB and apply opacity
-  const r = parseInt(color.slice(1, 3), 16);
-  const g = parseInt(color.slice(3, 5), 16);
-  const b = parseInt(color.slice(5, 7), 16);
-  c.strokeStyle = `rgba(${r},${g},${b},${opacity})`;
+  c.strokeStyle = hexToRgba(color, opacity);
   c.lineWidth = 1 / scale;
   for (let x = 0; x <= MAP_W; x += gridSize) {
     c.beginPath();

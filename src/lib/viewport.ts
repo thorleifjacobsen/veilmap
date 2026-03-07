@@ -49,3 +49,11 @@ export function clampViewport(vp: Viewport, mapW: number, mapH: number, screenW:
 export function clampToMap(value: number, size: number, mapDim: number): number {
   return Math.max(-size * 0.25, Math.min(value, mapDim - size * 0.75));
 }
+
+/** Convert hex color + opacity to rgba string */
+export function hexToRgba(hex: string, opacity: number): string {
+  const red = parseInt(hex.slice(1, 3), 16);
+  const green = parseInt(hex.slice(3, 5), 16);
+  const blue = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${red},${green},${blue},${opacity})`;
+}
