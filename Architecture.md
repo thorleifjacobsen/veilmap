@@ -62,9 +62,9 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Camera persisted in database (`camera_x/y/w/h` on session) — survives page reload
 
 ### Polygon Rooms (Meta Boxes)
-- Draw polygon rooms (`B` key) — click to place vertices, grid-snapped
+- Draw polygon rooms (`B` key) — click to place vertices freely, hold Shift to snap to grid
 - Click near first vertex to close the polygon (green snap indicator)
-- Escape to cancel polygon drawing
+- Escape removes last vertex; cancels entirely when ≤1 point remains
 - Rectangle rooms still supported (legacy)
 - Types: autoReveal, trigger (with notes popup), hazard (hatched), note (GM-only), hidden
 - Click to select (`S` key), right-click to edit/reveal/delete
@@ -129,17 +129,18 @@ Shortcuts shown as tooltips on hover in the toolbar.
 | `1-4` | Brush sizes (small → large) |
 | `Ctrl+Z` | Undo |
 | `Cmd+Z` | Undo (Mac) |
-| `Space+Drag` | Pan |
+| `Space+Drag` | Pan (shows hand cursor) |
 | `Scroll` | Zoom |
 | `+` / `-` | Zoom in/out |
-| `Escape` | Close modal / cancel drawing |
+| `Shift` | Hold to snap polygon vertices to grid |
+| `Escape` | Remove last polygon vertex / close modal |
 
 ## Data Model
 
 Five tables: `users`, `sessions`, `boxes`, `map_objects`, `asset_library`.
 
 - **users** — email, password hash, is_pro flag
-- **sessions** — slug, name, owner, map URL, fog snapshot, prep mode, display settings, camera viewport (x/y/w/h), show_grid
+- **sessions** — slug, name, owner, map URL, fog snapshot, prep mode, display settings, camera viewport (x/y/w/h), show_grid, grid_size
 - **boxes** — position, size, polygon points (JSON), type, name, color, notes, revealed state
 - **map_objects** — name, src (file URL), position, size, rotation, z_index, visible (GM), player_visible (default false), locked
 - **asset_library** — owner (nullable for globals), name, url, category (object/token), is_global flag

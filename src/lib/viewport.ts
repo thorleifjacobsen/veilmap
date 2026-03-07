@@ -44,7 +44,8 @@ export function clampViewport(vp: Viewport, mapW: number, mapH: number, screenW:
   };
 }
 
-/** Clamp a value (x or y position) to stay within the map bounds */
+/** Clamp a value (x or y position) to stay within the map bounds.
+ * Allows 25% of the object to extend beyond the map edge. */
 export function clampToMap(value: number, size: number, mapDim: number): number {
   return Math.max(-size * 0.25, Math.min(value, mapDim - size * 0.75));
 }
