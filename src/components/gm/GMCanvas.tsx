@@ -1167,10 +1167,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const now = performance.now();
       const dt = now - lastFrameTime;
       lastFrameTime = now;
-      // Auto-disable if sustained dropped frames (>50ms per frame = <20fps)
-      if (dt > 50) droppedFrames++;
-      else droppedFrames = Math.max(0, droppedFrames - 1);
-      if (droppedFrames > 30) {
+      // Auto-disable if sustained poor performance (>66ms = <15fps for 60+ frames)
+      if (dt > 66) droppedFrames++;
+      else droppedFrames = Math.max(0, droppedFrames - 2);
+      if (droppedFrames > 60) {
         setFogStyle('solid');
         fogStyleRef.current = 'solid';
         return;
@@ -1511,26 +1511,25 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           if (r.corner.includes('t')) { ny = orig.y + dy; nh = Math.max(MIN_OBJECT_SIZE, orig.h - dy); }
         } else {
           // Default: aspect ratio locked — scale proportionally from dragged corner
-          const aspect = orig.w / orig.h;
-          // Use the axis with larger movement to determine scale
-          let scale: number;
+          const minScale = Math.max(MIN_OBJECT_SIZE / orig.w, MIN_OBJECT_SIZE / orig.h);
+          let dragScaleW: number, dragScaleH: number;
           if (r.corner === 'br') {
-            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w + dx) / orig.w, (orig.h + dy) / orig.h)));
-            nw = orig.w * scale; nh = orig.h * scale;
+            dragScaleW = (orig.w + dx) / orig.w;
+            dragScaleH = (orig.h + dy) / orig.h;
           } else if (r.corner === 'bl') {
-            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w - dx) / orig.w, (orig.h + dy) / orig.h)));
-            nw = orig.w * scale; nh = orig.h * scale;
-            nx = orig.x + orig.w - nw;
+            dragScaleW = (orig.w - dx) / orig.w;
+            dragScaleH = (orig.h + dy) / orig.h;
           } else if (r.corner === 'tr') {
-            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w + dx) / orig.w, (orig.h - dy) / orig.h)));
-            nw = orig.w * scale; nh = orig.h * scale;
-            ny = orig.y + orig.h - nh;
+            dragScaleW = (orig.w + dx) / orig.w;
+            dragScaleH = (orig.h - dy) / orig.h;
           } else { // tl
-            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w - dx) / orig.w, (orig.h - dy) / orig.h)));
-            nw = orig.w * scale; nh = orig.h * scale;
-            nx = orig.x + orig.w - nw;
-            ny = orig.y + orig.h - nh;
+            dragScaleW = (orig.w - dx) / orig.w;
+            dragScaleH = (orig.h - dy) / orig.h;
           }
+          const scale = Math.max(minScale, Math.max(dragScaleW, dragScaleH));
+          nw = orig.w * scale; nh = orig.h * scale;
+          if (r.corner.includes('l')) nx = orig.x + orig.w - nw;
+          if (r.corner.includes('t')) ny = orig.y + orig.h - nh;
         }
         const updated = objectsRef.current.map(o =>
           o.id === r.objId ? { ...o, x: nx, y: ny, w: nw, h: nh } : o

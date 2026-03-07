@@ -99,13 +99,14 @@ export function renderAnimatedFog(
   height: number,
 ): void {
   // Sample fog mask at lower resolution for performance
-  const SAMPLE_SIZE = 8; // pixels per noise cell
+  const SAMPLE_SIZE = 12; // pixels per noise cell (larger = faster)
   const cols = Math.ceil(width / SAMPLE_SIZE);
   const rows = Math.ceil(height / SAMPLE_SIZE);
 
-  // Get fog mask pixel data to determine where fog exists
+  // Get fog mask pixel data at once (much faster than per-pixel getImageData)
   const fogCtx = fogCanvas.getContext('2d');
   if (!fogCtx) return;
+  const fogData = fogCtx.getImageData(0, 0, fogCanvas.width, fogCanvas.height).data;
 
   // Slow drift
   const drift = time * 0.015;
@@ -119,13 +120,13 @@ export function renderAnimatedFog(
       // Check if fog exists at this position (sample center of cell in fog canvas)
       const fogX = Math.min(px, fogCanvas.width - 1);
       const fogY = Math.min(py, fogCanvas.height - 1);
-      const fogPixel = fogCtx.getImageData(fogX, fogY, 1, 1).data;
-      if (fogPixel[3] < 128) continue; // No fog here, skip
+      const alphaIdx = (fogY * fogCanvas.width + fogX) * 4 + 3;
+      if (fogData[alphaIdx] < 128) continue; // No fog here, skip
 
       // Generate noise value
       const nx = col * 0.04 + drift;
       const ny = row * 0.04 + drift * 0.7;
-      const noise = fbm(nx, ny, 3);
+      const noise = fbm(nx, ny, 2); // 2 octaves for perf
 
       // Map noise to subtle brightness variation
       // Base fog is #1a1a2e (26, 26, 46)
