@@ -4,4 +4,6 @@ node_modules/
 .env.local
 *.tsbuildinfo
 dist/
-uploads/
+public/uploads/
+next-env.d.ts
+package-lock.json

@@ -6,6 +6,7 @@ CREATE TABLE users (
   id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   email        TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  is_pro       BOOLEAN DEFAULT FALSE,
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -15,8 +16,6 @@ CREATE TABLE sessions (
   owner_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name         TEXT NOT NULL DEFAULT 'New Session',
   map_url      TEXT,
-  map_width    INTEGER DEFAULT 2400,
-  map_height   INTEGER DEFAULT 1600,
   fog_snapshot BYTEA,
   prep_mode    BOOLEAN DEFAULT FALSE,
   prep_message TEXT DEFAULT 'Preparing next scene…',
@@ -38,7 +37,6 @@ CREATE TABLE boxes (
   h            REAL NOT NULL,
   color        TEXT DEFAULT '#c8963e',
   notes        TEXT DEFAULT '',
-  meta_json    JSONB DEFAULT '{}',
   revealed     BOOLEAN DEFAULT FALSE,
   sort_order   INTEGER DEFAULT 0,
   created_at   TIMESTAMPTZ DEFAULT NOW()
@@ -55,7 +53,6 @@ CREATE TABLE tokens (
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Index for fast session lookups
 CREATE INDEX idx_boxes_session    ON boxes(session_id);
 CREATE INDEX idx_tokens_session   ON tokens(session_id);
 CREATE INDEX idx_sessions_slug    ON sessions(slug);

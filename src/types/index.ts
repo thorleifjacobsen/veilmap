@@ -1,0 +1,104 @@
+// types/index.ts — All shared TypeScript types
+
+export type BoxType = 'autoReveal' | 'trigger' | 'hazard' | 'note' | 'hidden';
+
+export interface Box {
+  id: string;
+  session_id: string;
+  name: string;
+  type: BoxType;
+  x: number; y: number; w: number; h: number;
+  color: string;
+  notes: string;
+  revealed: boolean;
+  sort_order: number;
+}
+
+export interface Token {
+  id: string;
+  session_id: string;
+  emoji: string;
+  color: string;
+  x: number; y: number;
+  label: string;
+}
+
+export interface Session {
+  id: string;
+  slug: string;
+  owner_id: string;
+  name: string;
+  map_url: string | null;
+  prep_mode: boolean;
+  prep_message: string;
+  gm_fog_opacity: number;
+  grid_size: number;
+  boxes: Box[];
+  tokens: Token[];
+}
+
+export interface Viewport {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+// SSE event types sent from server to player display
+export type SSEEventType =
+  | 'state:full'
+  | 'fog:paint'
+  | 'fog:snapshot'
+  | 'fog:reset'
+  | 'box:reveal'
+  | 'box:hide'
+  | 'box:create'
+  | 'box:update'
+  | 'box:delete'
+  | 'token:create'
+  | 'token:move'
+  | 'token:delete'
+  | 'session:prep'
+  | 'session:settings'
+  | 'ping';
+
+export interface SSEEvent {
+  type: SSEEventType;
+  payload: unknown;
+}
+
+export interface FogPaintPayload {
+  x: number; y: number;
+  radius: number;
+  mode: 'reveal' | 'hide';
+}
+
+export interface FogSnapshotPayload {
+  png: string; // base64
+}
+
+export interface PingPayload {
+  x: number; y: number;
+}
+
+export interface PrepPayload {
+  active: boolean;
+  message?: string;
+}
+
+export interface FullStatePayload {
+  session: Session;
+  fogPng: string | null;
+}
+
+// Session export format for free users
+export interface SessionExport {
+  version: 1;
+  name: string;
+  boxes: Omit<Box, 'id' | 'session_id'>[];
+  tokens: Omit<Token, 'id' | 'session_id'>[];
+  settings: {
+    gm_fog_opacity: number;
+    grid_size: number;
+    prep_message: string;
+  };
+}
