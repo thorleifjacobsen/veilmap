@@ -110,6 +110,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     open: false, x: 0, y: 0, mapX: 0, mapY: 0, box: null, token: null,
   });
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [gridMenuOpen, setGridMenuOpen] = useState<{ x: number; y: number } | null>(null);
+  const [drawGridMode, setDrawGridMode] = useState(false);
 
   // Mutable refs for interaction state
   const vpRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
@@ -148,6 +152,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const cameraModeRef = useRef<CameraInteraction>('idle');
   const cameraGrabOffsetRef = useRef({ x: 0, y: 0 });
   const blackoutActiveRef = useRef(false);
+  const selectedObjectIdRef = useRef<string | null>(null);
+  const objectDragRef = useRef<{ objId: string; offsetX: number; offsetY: number } | null>(null);
+  const objectResizeRef = useRef<{ objId: string; corner: string; startX: number; startY: number; origObj: MapObject } | null>(null);
+  const snapToGridRef = useRef(false);
+  const gridDrawStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Keep refs in sync
   useEffect(() => { toolRef.current = tool; }, [tool]);
@@ -159,6 +168,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { brushRadiusRef.current = brushRadius; }, [brushRadius]);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
   useEffect(() => { blackoutActiveRef.current = blackoutActive; }, [blackoutActive]);
+  useEffect(() => { selectedObjectIdRef.current = selectedObjectId; }, [selectedObjectId]);
+  useEffect(() => { snapToGridRef.current = snapToGrid; }, [snapToGrid]);
 
   // ── Notification ──
   const notifTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -531,6 +542,30 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.fillStyle = 'rgba(0,200,255,.95)';
       ctx.fillText(label, cam.x + pad, cam.y + pad);
       ctx.restore();
+    }
+
+    // Selected object transform handles
+    const selObjId = selectedObjectIdRef.current;
+    if (selObjId) {
+      const obj = objectsRef.current.find(o => o.id === selObjId);
+      if (obj) {
+        ctx.save();
+        applyViewport(ctx, vp);
+        ctx.strokeStyle = 'rgba(0,180,255,.8)';
+        ctx.lineWidth = 2 / vp.scale;
+        ctx.setLineDash([]);
+        ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+        const hs = 8 / vp.scale;
+        ctx.fillStyle = 'rgba(0,180,255,.9)';
+        [[obj.x, obj.y], [obj.x + obj.w, obj.y], [obj.x, obj.y + obj.h], [obj.x + obj.w, obj.y + obj.h]].forEach(([cx, cy]) => {
+          ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
+        });
+        const ms = 6 / vp.scale;
+        [[obj.x + obj.w / 2, obj.y], [obj.x + obj.w / 2, obj.y + obj.h], [obj.x, obj.y + obj.h / 2], [obj.x + obj.w, obj.y + obj.h / 2]].forEach(([cx, cy]) => {
+          ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
+        });
+        ctx.restore();
+      }
     }
 
     // Camera drag preview (drawing new camera)
@@ -968,6 +1003,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const { sx, sy } = getCanvasPos(e);
       const mp = screenToMap(sx, sy, vpRef.current);
 
+      // Draw Grid Size mode
+      if (drawGridMode) {
+        gridDrawStartRef.current = { x: mp.x, y: mp.y };
+        return;
+      }
+
       // Camera tool – drag, resize, or draw new
       if (toolRef.current === 'camera') {
         const cam = cameraRef.current;
@@ -1015,6 +1056,38 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
 
+      // Object selection, drag, and resize
+      if (toolRef.current === 'select') {
+        const selObj = selectedObjectIdRef.current ? objectsRef.current.find(o => o.id === selectedObjectIdRef.current) : null;
+        if (selObj) {
+          const hs = 12 / vpRef.current.scale;
+          const corners = [
+            { corner: 'tl', x: selObj.x, y: selObj.y },
+            { corner: 'tr', x: selObj.x + selObj.w, y: selObj.y },
+            { corner: 'bl', x: selObj.x, y: selObj.y + selObj.h },
+            { corner: 'br', x: selObj.x + selObj.w, y: selObj.y + selObj.h },
+          ];
+          const hitCorner = corners.find(c => Math.abs(mp.x - c.x) < hs && Math.abs(mp.y - c.y) < hs);
+          if (hitCorner) {
+            objectResizeRef.current = { objId: selObj.id, corner: hitCorner.corner, startX: mp.x, startY: mp.y, origObj: { ...selObj } };
+            return;
+          }
+          if (mp.x >= selObj.x && mp.x <= selObj.x + selObj.w && mp.y >= selObj.y && mp.y <= selObj.y + selObj.h && !selObj.locked) {
+            objectDragRef.current = { objId: selObj.id, offsetX: mp.x - selObj.x, offsetY: mp.y - selObj.y };
+            return;
+          }
+        }
+        const clickedObj = [...objectsRef.current].sort((a, b) => b.zIndex - a.zIndex).find(o =>
+          o.visible && mp.x >= o.x && mp.x <= o.x + o.w && mp.y >= o.y && mp.y <= o.y + o.h
+        );
+        if (clickedObj) {
+          setSelectedObjectId(clickedObj.id);
+          drawTop();
+          return;
+        }
+        setSelectedObjectId(null);
+      }
+
       // Token drag
       if (toolRef.current === 'select' || toolRef.current === 'token') {
         const tok = tokensRef.current.slice().reverse().find((t) => Math.hypot(t.x - mp.x, t.y - mp.y) < 18);
@@ -1056,7 +1129,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         paintFog(mp.x, mp.y, toolRef.current);
       }
     },
-    [getCanvasPos, placeToken, addPing, addTorch, setTool, clickSelect, pushUndo, paintFog, drawTop],
+    [getCanvasPos, placeToken, addPing, addTorch, setTool, clickSelect, pushUndo, paintFog, drawTop, drawGridMode],
   );
 
   const handleMouseMove = useCallback(
@@ -1072,6 +1145,48 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           y: panOriginRef.current.y + (e.clientY - panStartRef.current.y),
         };
         redrawAll();
+        return;
+      }
+
+      if (objectDragRef.current) {
+        const drag = objectDragRef.current;
+        const obj = objectsRef.current.find(o => o.id === drag.objId);
+        if (obj) {
+          let newX = mp.x - drag.offsetX;
+          let newY = mp.y - drag.offsetY;
+          if (snapToGridRef.current) {
+            const gs = gridSizeRef.current;
+            const objCenterX = newX + obj.w / 2;
+            const objCenterY = newY + obj.h / 2;
+            newX = snap(objCenterX, gs) - obj.w / 2;
+            newY = snap(objCenterY, gs) - obj.h / 2;
+          }
+          const updated = objectsRef.current.map(o =>
+            o.id === drag.objId ? { ...o, x: newX, y: newY } : o
+          );
+          objectsRef.current = updated;
+          setObjects(updated);
+          drawMap();
+          drawTop();
+        }
+        return;
+      }
+      if (objectResizeRef.current) {
+        const r = objectResizeRef.current;
+        const orig = r.origObj;
+        let nx = orig.x, ny = orig.y, nw = orig.w, nh = orig.h;
+        const dx = mp.x - r.startX, dy = mp.y - r.startY;
+        if (r.corner.includes('r')) { nw = Math.max(20, orig.w + dx); }
+        if (r.corner.includes('l')) { nx = orig.x + dx; nw = Math.max(20, orig.w - dx); }
+        if (r.corner.includes('b')) { nh = Math.max(20, orig.h + dy); }
+        if (r.corner.includes('t')) { ny = orig.y + dy; nh = Math.max(20, orig.h - dy); }
+        const updated = objectsRef.current.map(o =>
+          o.id === r.objId ? { ...o, x: nx, y: ny, w: nw, h: nh } : o
+        );
+        objectsRef.current = updated;
+        setObjects(updated);
+        drawMap();
+        drawTop();
         return;
       }
 
@@ -1147,13 +1262,31 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         drawTop();
       }
     },
-    [getCanvasPos, redrawAll, drawTop, paintFog],
+    [getCanvasPos, redrawAll, drawTop, drawMap, paintFog],
   );
 
   const handleMouseUp = useCallback(
     (e: ReactMouseEvent) => {
       if (panningRef.current) {
         panningRef.current = false;
+        return;
+      }
+      if (objectDragRef.current) {
+        objectDragRef.current = null;
+        fetch(`/api/sessions/${slug}/fog`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ objects: objectsRef.current }),
+        }).catch(() => {});
+        return;
+      }
+      if (objectResizeRef.current) {
+        objectResizeRef.current = null;
+        fetch(`/api/sessions/${slug}/fog`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ objects: objectsRef.current }),
+        }).catch(() => {});
         return;
       }
       if (dragTokenRef.current) {
@@ -1165,6 +1298,22 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
       const { sx, sy } = getCanvasPos(e);
       const mp = screenToMap(sx, sy, vpRef.current);
+
+      // Draw Grid Size finalization
+      if (drawGridMode && gridDrawStartRef.current) {
+        const w = Math.abs(mp.x - gridDrawStartRef.current.x);
+        const h = Math.abs(mp.y - gridDrawStartRef.current.y);
+        const newSize = Math.round(Math.max(w, h));
+        if (newSize > 5) {
+          setGridSize(newSize);
+          gridSizeRef.current = newSize;
+          showNotif(`Grid size set to ${newSize}px`);
+        }
+        gridDrawStartRef.current = null;
+        setDrawGridMode(false);
+        drawTop();
+        return;
+      }
 
       // Camera tool: finalize camera operation
       if (toolRef.current === 'camera' && cameraModeRef.current !== 'idle') {
@@ -1210,7 +1359,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         sendFogSnapshot();
       }
     },
-    [getCanvasPos, drawTop, apiTokenMove, finalizeBox, sendFogSnapshot, broadcastCamera, showNotif],
+    [getCanvasPos, drawTop, drawMap, drawGridMode, apiTokenMove, finalizeBox, sendFogSnapshot, broadcastCamera, showNotif],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1219,6 +1368,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     drawStartRef.current = null;
     measureStartRef.current = null;
     cameraDragRef.current = null;
+    objectDragRef.current = null;
+    objectResizeRef.current = null;
     if (paintingRef.current) {
       paintingRef.current = false;
       paintUndoPushedRef.current = false;
@@ -1384,6 +1535,18 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     },
     [slug],
   );
+
+  const handleGridRightClick = useCallback((e: React.MouseEvent) => {
+    setGridMenuOpen({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  // Close grid context menu on click-away
+  useEffect(() => {
+    if (!gridMenuOpen) return;
+    const close = () => setGridMenuOpen(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [gridMenuOpen]);
 
   const handleObjectAdd = useCallback(
     (file: File) => {
@@ -1639,6 +1802,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid((v) => { showGridRef.current = !v; return !v; })}
           onResetFog={handleResetFog}
+          onGridRightClick={handleGridRightClick}
+          snapToGrid={snapToGrid}
+          onSnapToGridToggle={() => { setSnapToGrid(v => { snapToGridRef.current = !v; return !v; }); }}
         />
 
         {/* Canvas wrapper */}
@@ -1701,6 +1867,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           tokens={tokens}
           objects={objects}
           selectedBoxId={selectedBoxId}
+          selectedObjectId={selectedObjectId}
+          onObjectSelect={(id) => { setSelectedObjectId(id); drawTop(); }}
           onBoxClick={(b) => { setEditingBox(b); setBoxEditorOpen(true); setSelectedBoxId(b.id); }}
           onRevealAll={handleRevealAll}
           onClearBoxes={handleClearBoxes}
@@ -1731,6 +1899,36 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       >
         {notification}
       </div>
+
+      {/* Grid context menu */}
+      {gridMenuOpen && (
+        <div
+          className="fixed z-[900] rounded border shadow-lg py-1"
+          style={{ left: gridMenuOpen.x, top: gridMenuOpen.y, background: '#100f18', borderColor: 'rgba(200,150,62,.3)', minWidth: 180 }}
+        >
+          <div
+            className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+            style={{ fontFamily: "'Cinzel',serif", color: showGrid ? '#c8963e' : '#d4c4a0' }}
+            onClick={() => { setShowGrid(v => { showGridRef.current = !v; return !v; }); setGridMenuOpen(null); }}
+          >
+            {showGrid ? '✓ ' : '  '}Toggle Grid
+          </div>
+          <div
+            className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+            style={{ fontFamily: "'Cinzel',serif", color: snapToGrid ? '#c8963e' : '#d4c4a0' }}
+            onClick={() => { setSnapToGrid(v => { const nv = !v; snapToGridRef.current = nv; showNotif(nv ? 'Snap on' : 'Snap off'); return nv; }); setGridMenuOpen(null); }}
+          >
+            {snapToGrid ? '✓ ' : '  '}Snap Objects to Grid
+          </div>
+          <div
+            className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+            style={{ fontFamily: "'Cinzel',serif", color: '#d4c4a0' }}
+            onClick={() => { setDrawGridMode(true); setGridMenuOpen(null); showNotif('Draw a rectangle matching a known grid cell on the map'); }}
+          >
+            📏 Draw Grid Size
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       <BoxEditor

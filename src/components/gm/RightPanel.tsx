@@ -29,6 +29,8 @@ interface RightPanelProps {
   tokens: Token[];
   objects: MapObject[];
   selectedBoxId: string | null;
+  selectedObjectId: string | null;
+  onObjectSelect: (id: string | null) => void;
   onBoxClick: (box: Box) => void;
   onRevealAll: () => void;
   onClearBoxes: () => void;
@@ -47,6 +49,8 @@ export default function RightPanel({
   boxes,
   objects,
   selectedBoxId,
+  selectedObjectId,
+  onObjectSelect,
   onBoxClick,
   onRevealAll,
   onClearBoxes,
@@ -198,8 +202,13 @@ export default function RightPanel({
             {sortedObjects.map((obj) => (
               <div
                 key={obj.id}
-                className="mb-0.5 flex items-center gap-1 rounded border px-1 py-0.5 text-[.72rem] transition-all hover:bg-[rgba(200,150,62,.05)]"
-                style={{ borderColor: 'transparent', opacity: obj.visible ? 1 : 0.4 }}
+                className="mb-0.5 flex cursor-pointer items-center gap-1 rounded border px-1 py-0.5 text-[.72rem] transition-all hover:bg-[rgba(200,150,62,.05)]"
+                style={{
+                  borderColor: selectedObjectId === obj.id ? '#c8963e' : 'transparent',
+                  background: selectedObjectId === obj.id ? 'rgba(200,150,62,.07)' : 'transparent',
+                  opacity: obj.visible ? 1 : 0.4,
+                }}
+                onClick={() => onObjectSelect(selectedObjectId === obj.id ? null : obj.id)}
               >
                 {/* Thumbnail */}
                 <div

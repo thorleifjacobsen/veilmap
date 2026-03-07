@@ -17,6 +17,9 @@ interface ToolbarProps {
   showGrid: boolean;
   onToggleGrid: () => void;
   onResetFog: () => void;
+  onGridRightClick?: (e: React.MouseEvent) => void;
+  snapToGrid?: boolean;
+  onSnapToGridToggle?: () => void;
 }
 
 export default function Toolbar({
@@ -27,6 +30,7 @@ export default function Toolbar({
   showGrid,
   onToggleGrid,
   onResetFog,
+  onGridRightClick,
 }: ToolbarProps) {
   return (
     <div
@@ -154,6 +158,7 @@ export default function Toolbar({
           kbd="G"
           active={showGrid}
           onClick={onToggleGrid}
+          onContextMenu={onGridRightClick ? (e) => { e.preventDefault(); onGridRightClick(e); } : undefined}
         />
       </ToolGroup>
     </div>
@@ -183,12 +188,14 @@ function ToolBtn({
   kbd,
   active,
   onClick,
+  onContextMenu,
 }: {
   icon: React.ReactNode;
   label: string;
   kbd?: string;
   active: boolean;
   onClick: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <button
@@ -199,6 +206,7 @@ function ToolBtn({
         color: active ? '#c8963e' : '#d4c4a0',
       }}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       {icon}
       <span
