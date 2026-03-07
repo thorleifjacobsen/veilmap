@@ -27,6 +27,7 @@ interface RightPanelProps {
   onObjectUpdate: (id: string, updates: Partial<MapObject>) => void;
   onObjectDelete: (id: string) => void;
   onObjectReorder: (id: string, direction: 'up' | 'down') => void;
+  onLibraryOpen?: () => void;
 }
 
 export default function RightPanel({
@@ -45,6 +46,7 @@ export default function RightPanel({
   onObjectUpdate,
   onObjectDelete,
   onObjectReorder,
+  onLibraryOpen,
 }: RightPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectInputRef = useRef<HTMLInputElement>(null);
@@ -152,6 +154,15 @@ export default function RightPanel({
             >
               {objects.length}
             </span>
+            {onLibraryOpen && (
+              <span
+                className="cursor-pointer text-[.58rem]"
+                style={{ color: '#c8963e' }}
+                onClick={onLibraryOpen}
+              >
+                📚
+              </span>
+            )}
             <span
               className="cursor-pointer text-[.58rem]"
               style={{ color: '#c8963e' }}

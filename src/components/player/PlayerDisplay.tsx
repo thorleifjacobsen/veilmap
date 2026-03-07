@@ -328,30 +328,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           }
           break;
         }
-        case 'token:create': {
-          const token = event.payload as Session['tokens'][0];
-          if (sessionRef.current) {
-            sessionRef.current = { ...sessionRef.current, tokens: [...sessionRef.current.tokens, token] };
-          }
-          break;
-        }
-        case 'token:move': {
-          const p = event.payload as { tokenId: string; x: number; y: number };
-          if (sessionRef.current) {
-            sessionRef.current = {
-              ...sessionRef.current,
-              tokens: sessionRef.current.tokens.map(t => t.id === p.tokenId ? { ...t, x: p.x, y: p.y } : t),
-            };
-          }
-          break;
-        }
-        case 'token:delete': {
-          const p = event.payload as { tokenId: string };
-          if (sessionRef.current) {
-            sessionRef.current = { ...sessionRef.current, tokens: sessionRef.current.tokens.filter(t => t.id !== p.tokenId) };
-          }
-          break;
-        }
         case 'session:prep': {
           const p = event.payload as { active: boolean; message?: string };
           setPrepMode(p.active);
@@ -411,20 +387,17 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     return <PrepScreen message={prepMessage} />;
   }
 
-  // Blackout screen
-  if (blackout?.active) {
-    return (
-      <div className="fixed inset-0 bg-black flex items-center justify-center">
-        <div style={{ fontFamily: 'Cinzel, serif', fontSize: '1.2rem', color: 'rgba(200,150,62,.4)', letterSpacing: '.2em', textAlign: 'center' }}>
-          {blackout.message || 'Please wait…'}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div ref={containerRef} className="fixed inset-0 bg-black" onContextMenu={(e) => e.preventDefault()}>
       <canvas ref={canvasRef} className="w-full h-full block" />
+      {/* Blackout overlay */}
+      {blackout?.active && (
+        <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
+          <div style={{ fontFamily: 'Cinzel, serif', fontSize: '1.2rem', color: 'rgba(200,150,62,.4)', letterSpacing: '.2em', textAlign: 'center' }}>
+            {blackout.message || 'Please wait…'}
+          </div>
+        </div>
+      )}
       <div className="absolute inset-0 pointer-events-none" style={{
         background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.7) 100%)',
       }} />

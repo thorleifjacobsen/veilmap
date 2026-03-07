@@ -132,7 +132,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const polyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const measureStartRef = useRef<MeasureState | null>(null);
   const mousePosRef = useRef({ x: 0, y: 0, mx: 0, my: 0 });
-  const dragOffsetRef = useRef({ x: 0, y: 0 });
   const undoStackRef = useRef<HTMLCanvasElement[]>([]);
   const pingsRef = useRef<Ping[]>([]);
   const topLoopRef = useRef(false);
@@ -1441,7 +1440,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const handleCtxAction = useCallback(
     (action: string) => {
       setContextMenu((prev) => ({ ...prev, open: false }));
-      const { mapX, mapY, box, token } = contextMenu;
+      const { mapX, mapY, box } = contextMenu;
       switch (action) {
         case 'reveal':
           pushUndo();
@@ -1477,7 +1476,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, drawTop, apiBoxDelete],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete],
   );
 
   // ── Box editor callbacks ──
@@ -1889,6 +1888,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           onObjectUpdate={handleObjectUpdate}
           onObjectDelete={handleObjectDelete}
           onObjectReorder={handleObjectReorder}
+          onLibraryOpen={openLibrary}
         />
       </div>
 

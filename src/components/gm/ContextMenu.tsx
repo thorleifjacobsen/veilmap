@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import type { Box, Token } from '@/types';
+import type { Box } from '@/types';
 
 export interface ContextMenuState {
   open: boolean;
@@ -10,7 +10,7 @@ export interface ContextMenuState {
   mapX: number;
   mapY: number;
   box: Box | null;
-  token: Token | null;
+  token: null;
 }
 
 interface ContextMenuProps {
@@ -41,7 +41,6 @@ export default function ContextMenu({ state, onClose, onAction }: ContextMenuPro
   const left = Math.min(state.x, window.innerWidth - 200);
   const top = Math.min(state.y, window.innerHeight - 320);
   const hasBox = !!state.box;
-  const hasToken = !!state.token;
 
   return (
     <div
@@ -67,7 +66,6 @@ export default function ContextMenu({ state, onClose, onAction }: ContextMenuPro
       <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
 
       <CxItem icon="ping" label="Ping location" shortcut="P" onClick={() => onAction('ping')} />
-      <CxItem icon="torch" label="Place torch" onClick={() => onAction('torch')} />
 
       {hasBox && (
         <>
@@ -89,12 +87,6 @@ export default function ContextMenu({ state, onClose, onAction }: ContextMenuPro
         </>
       )}
 
-      {hasToken && (
-        <>
-          <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
-          <CxItem icon="delete" label="Remove token" red onClick={() => onAction('deleteToken')} />
-        </>
-      )}
     </div>
   );
 }
