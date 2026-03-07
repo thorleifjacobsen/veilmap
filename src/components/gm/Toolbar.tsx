@@ -17,6 +17,7 @@ interface ToolbarProps {
   showGrid: boolean;
   onToggleGrid: () => void;
   onResetFog: () => void;
+  onRevealAllFog: () => void;
   onGridRightClick?: (e: React.MouseEvent) => void;
   snapToGrid?: boolean;
   onSnapToGridToggle?: () => void;
@@ -30,6 +31,7 @@ export default function Toolbar({
   showGrid,
   onToggleGrid,
   onResetFog,
+  onRevealAllFog,
   onGridRightClick,
 }: ToolbarProps) {
   return (
@@ -61,6 +63,12 @@ export default function Toolbar({
           label="Reset"
           active={false}
           onClick={onResetFog}
+        />
+        <ToolBtn
+          icon={<RevealAllIcon />}
+          label="Unfog"
+          active={false}
+          onClick={onRevealAllFog}
         />
       </ToolGroup>
 
@@ -235,6 +243,15 @@ function ResetIcon() {
     <svg {...svgProps}>
       <path d="M3 12a9 9 0 109-9 9.75 9.75 0 00-6.74 2.74L3 8" />
       <path d="M3 3v5h5" />
+    </svg>
+  );
+}
+
+function RevealAllIcon() {
+  return (
+    <svg {...svgProps}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M8 12l3 3 5-5" />
     </svg>
   );
 }

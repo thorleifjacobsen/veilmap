@@ -79,6 +79,11 @@ export async function POST(
     broadcast(slug, { type: 'fog:reset', payload: {} });
   }
 
+  // body.revealall sends a fog reveal-all event
+  if (body.revealall) {
+    broadcast(slug, { type: 'fog:revealall', payload: {} });
+  }
+
   // body.ping sends a ping event
   if (body.ping) {
     broadcast(slug, { type: 'ping', payload: body.ping });

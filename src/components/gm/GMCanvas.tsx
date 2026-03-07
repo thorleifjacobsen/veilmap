@@ -15,6 +15,7 @@ import {
   createFogCanvas,
   paintReveal,
   paintHide,
+  revealAllFog,
   revealBox as revealBoxFog,
   fogToBase64,
 } from '@/lib/fog-engine';
@@ -126,6 +127,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const panStartRef = useRef({ x: 0, y: 0 });
   const panOriginRef = useRef({ x: 0, y: 0 });
   const spaceHeldRef = useRef(false);
+  const ctrlHeldRef = useRef(false);
   const paintingRef = useRef(false);
   const paintUndoPushedRef = useRef(false);
   const drawStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -137,6 +139,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const topLoopRef = useRef(false);
   const boxNumRef = useRef(1);
   const fogThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const objectThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fogSnapshotTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toolRef = useRef<ToolName>('reveal');
   const boxesRef = useRef<Box[]>(session.boxes || []);
@@ -319,7 +323,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         }
       }
     });
-    if (showGridRef.current) drawGridLines(ctx, gridSizeRef.current, vpRef.current.scale);
     ctx.restore();
   }, []);
 
@@ -359,6 +362,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     applyViewport(ctx, vp);
+
+    // Grid overlay (above fog, above objects)
+    if (showGridRef.current) drawGridLines(ctx, gridSizeRef.current, vp.scale);
 
     const now = Date.now();
 
@@ -414,12 +420,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.save();
       applyViewport(ctx, vp);
       const gs = gridSizeRef.current;
+      const useSnap = ctrlHeldRef.current;
       const bx = Math.min(ds.x, mp.mx);
       const by = Math.min(ds.y, mp.my);
       const bw = Math.abs(mp.mx - ds.x);
       const bh = Math.abs(mp.my - ds.y);
-      const sx = snap(bx, gs), sy = snap(by, gs);
-      const sw = Math.max(gs, snap(bw, gs)), sh = Math.max(gs, snap(bh, gs));
+      const sx = useSnap ? snap(bx, gs) : bx;
+      const sy = useSnap ? snap(by, gs) : by;
+      const sw = useSnap ? Math.max(gs, snap(bw, gs)) : bw;
+      const sh = useSnap ? Math.max(gs, snap(bh, gs)) : bh;
       ctx.strokeStyle = 'rgba(200,150,62,.75)';
       ctx.lineWidth = 2 / vp.scale;
       ctx.setLineDash([6 / vp.scale, 3 / vp.scale]);
@@ -427,11 +436,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.setLineDash([]);
       ctx.fillStyle = 'rgba(200,150,62,.05)';
       ctx.fillRect(sx, sy, sw, sh);
-      ctx.font = `${Math.min(sw, sh) * 0.09}px Cinzel,serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = 'rgba(200,150,62,.4)';
-      ctx.fillText(`${~~(sw / gs)}×${~~(sh / gs)}sq`, sx + sw / 2, sy + sh / 2);
+      if (gs > 0 && useSnap) {
+        ctx.font = `${Math.min(sw, sh) * 0.09}px Cinzel,serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(200,150,62,.4)';
+        ctx.fillText(`${~~(sw / gs)}×${~~(sh / gs)}sq`, sx + sw / 2, sy + sh / 2);
+      }
       ctx.restore();
     }
 
@@ -440,6 +451,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     if (toolRef.current === 'box' && pts.length > 0) {
       const mp = mousePosRef.current;
       const gs = gridSizeRef.current;
+      const useSnap = ctrlHeldRef.current;
+      const cursorX = useSnap ? snap(mp.mx, gs) : mp.mx;
+      const cursorY = useSnap ? snap(mp.my, gs) : mp.my;
       ctx.save();
       applyViewport(ctx, vp);
       ctx.strokeStyle = 'rgba(200,150,62,.75)';
@@ -459,7 +473,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
       ctx.beginPath();
       ctx.moveTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-      ctx.lineTo(snap(mp.mx, gs), snap(mp.my, gs));
+      ctx.lineTo(cursorX, cursorY);
       ctx.stroke();
       ctx.setLineDash([]);
 
@@ -474,7 +488,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       // Snap-close indicator when near first point
       if (pts.length >= 3) {
         const first = pts[0];
-        const snapDist = Math.hypot(snap(mp.mx, gs) - first.x, snap(mp.my, gs) - first.y);
+        const snapDist = Math.hypot(cursorX - first.x, cursorY - first.y);
         if (snapDist < POLYGON_SNAP_DISTANCE) {
           ctx.strokeStyle = 'rgba(100,255,100,.6)';
           ctx.lineWidth = 2 / vp.scale;
@@ -747,8 +761,35 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     composeFogGM();
     redrawBoxes();
     showNotif('Fog reset');
+    // Broadcast reset event for immediate player update
+    fetch(`/api/sessions/${slug}/fog`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reset: true }),
+    }).catch(() => {});
     sendFogSnapshot();
-  }, [pushUndo, composeFogGM, redrawBoxes, showNotif, sendFogSnapshot]);
+  }, [pushUndo, composeFogGM, redrawBoxes, showNotif, sendFogSnapshot, slug]);
+
+  const revealAll = useCallback(() => {
+    pushUndo();
+    const fogCanvas = fogCanvasRef.current;
+    if (!fogCanvas) return;
+    const ctx = fogCanvas.getContext('2d')!;
+    revealAllFog(ctx);
+    const updatedBoxes = boxesRef.current.map((b) => ({ ...b, revealed: true }));
+    boxesRef.current = updatedBoxes;
+    setBoxes(updatedBoxes);
+    composeFogGM();
+    redrawBoxes();
+    showNotif('All fog revealed');
+    // Broadcast revealall event for immediate player update
+    fetch(`/api/sessions/${slug}/fog`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revealall: true }),
+    }).catch(() => {});
+    sendFogSnapshot();
+  }, [pushUndo, composeFogGM, redrawBoxes, showNotif, sendFogSnapshot, slug]);
 
   // ── Tool switching ──
 
@@ -778,14 +819,17 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const finalizeBox = useCallback(
     (a: { x: number; y: number }, b: { x: number; y: number }) => {
       const gs = gridSizeRef.current;
+      const useSnap = ctrlHeldRef.current;
       const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
       const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
       if (w < MIN_OBJECT_SIZE || h < MIN_OBJECT_SIZE) {
         showNotif('Too small');
         return;
       }
-      const sx = snap(x, gs), sy = snap(y, gs);
-      const sw = Math.max(gs, snap(w, gs)), sh = Math.max(gs, snap(h, gs));
+      const sx = useSnap ? snap(x, gs) : x;
+      const sy = useSnap ? snap(y, gs) : y;
+      const sw = useSnap ? Math.max(gs, snap(w, gs)) : w;
+      const sh = useSnap ? Math.max(gs, snap(h, gs)) : h;
       const newBox: Box = {
         id: uuidv4(),
         session_id: session.id,
@@ -968,6 +1012,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         e.preventDefault();
         spaceHeldRef.current = true;
       }
+      if (e.ctrlKey || e.metaKey) ctrlHeldRef.current = true;
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
         undo();
@@ -994,7 +1039,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         brushRadiusRef.current = brushKeys[e.key];
       }
       if (e.key === 'Escape') {
-        polyPointsRef.current = [];
+        // Undo last polygon point; cancel entirely only if 0-1 points left
+        if (polyPointsRef.current.length > 1) {
+          polyPointsRef.current.pop();
+          drawTop();
+        } else {
+          polyPointsRef.current = [];
+          drawTop();
+        }
         setContextMenu((prev) => ({ ...prev, open: false }));
         setBoxEditorOpen(false);
         setSettingsOpen(false);
@@ -1018,6 +1070,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') spaceHeldRef.current = false;
+      if (!e.ctrlKey && !e.metaKey) ctrlHeldRef.current = false;
     };
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
@@ -1025,7 +1078,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [undo, setTool, redrawAll, broadcastBlackout, prepMessage, showNotif]);
+  }, [undo, setTool, redrawAll, broadcastBlackout, prepMessage, showNotif, drawTop]);
 
   // ── Mouse handlers ──
 
@@ -1108,7 +1161,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             { corner: 'br', x: selObj.x + selObj.w, y: selObj.y + selObj.h },
           ];
           const hitCorner = corners.find(c => Math.abs(mp.x - c.x) < hs && Math.abs(mp.y - c.y) < hs);
-          if (hitCorner) {
+          if (hitCorner && !selObj.locked) {
             objectResizeRef.current = { objId: selObj.id, corner: hitCorner.corner, startX: mp.x, startY: mp.y, origObj: { ...selObj } };
             return;
           }
@@ -1118,7 +1171,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           }
         }
         const clickedObj = [...objectsRef.current].sort((a, b) => b.zIndex - a.zIndex).find(o =>
-          o.visible && mp.x >= o.x && mp.x <= o.x + o.w && mp.y >= o.y && mp.y <= o.y + o.h
+          o.visible && !o.locked && mp.x >= o.x && mp.x <= o.x + o.w && mp.y >= o.y && mp.y <= o.y + o.h
         );
         if (clickedObj) {
           setSelectedObjectId(clickedObj.id);
@@ -1130,7 +1183,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
       if (toolRef.current === 'box') {
         const gs = gridSizeRef.current;
-        const sx2 = snap(mp.x, gs), sy2 = snap(mp.y, gs);
+        const useSnap = ctrlHeldRef.current;
+        const sx2 = useSnap ? snap(mp.x, gs) : mp.x;
+        const sy2 = useSnap ? snap(mp.y, gs) : mp.y;
         const polyPts = polyPointsRef.current;
 
         // Check if closing the polygon (click near first point)
@@ -1210,6 +1265,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           setObjects(updated);
           drawMap();
           drawTop();
+          // Throttle object broadcast during drag for real-time player updates
+          if (!objectThrottleRef.current) {
+            objectThrottleRef.current = setTimeout(() => {
+              objectThrottleRef.current = null;
+              broadcastObjects(objectsRef.current);
+            }, 150);
+          }
         }
         return;
       }
@@ -1229,6 +1291,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         setObjects(updated);
         drawMap();
         drawTop();
+        // Throttle object broadcast during resize for real-time player updates
+        if (!objectThrottleRef.current) {
+          objectThrottleRef.current = setTimeout(() => {
+            objectThrottleRef.current = null;
+            broadcastObjects(objectsRef.current);
+          }, 150);
+        }
         return;
       }
 
@@ -1289,6 +1358,16 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           }
         }
         // 'drawing' mode uses cameraDragRef preview in drawTop
+        // Throttle camera broadcasts during drag for real-time player updates
+        if (cameraModeRef.current !== 'drawing' && cam) {
+          if (!cameraThrottleRef.current) {
+            cameraThrottleRef.current = setTimeout(() => {
+              cameraThrottleRef.current = null;
+              const c = cameraRef.current;
+              if (c) broadcastCamera(c);
+            }, 100);
+          }
+        }
         drawTop();
         return;
       }
@@ -1586,12 +1665,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           const aspect = img.naturalWidth / img.naturalHeight;
           const w = Math.min(img.naturalWidth, 400);
           const h = w / aspect;
+          // Place at center of current GM viewport
+          const wrap = wrapRef.current;
+          const vp = vpRef.current;
+          let cx = MAP_W / 2 - w / 2, cy = MAP_H / 2 - h / 2;
+          if (wrap) {
+            const center = screenToMap(wrap.offsetWidth / 2, wrap.offsetHeight / 2, vp);
+            cx = center.x - w / 2;
+            cy = center.y - h / 2;
+          }
           const newObj: MapObject = {
             id,
             name: file.name.replace(/\.[^.]+$/, ''),
             src: url,
-            x: 100,
-            y: 100,
+            x: cx,
+            y: cy,
             w,
             h,
             rotation: 0,
@@ -1748,6 +1836,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     resetFog();
   }, [resetFog]);
 
+  const handleRevealAllFog = useCallback(() => {
+    if (typeof window !== 'undefined' && !window.confirm('Reveal all fog?')) return;
+    revealAll();
+  }, [revealAll]);
+
   // ── Drop map on canvas ──
 
   const handleDrop = useCallback(
@@ -1812,6 +1905,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid((v) => { showGridRef.current = !v; return !v; })}
           onResetFog={handleResetFog}
+          onRevealAllFog={handleRevealAllFog}
           onGridRightClick={handleGridRightClick}
           snapToGrid={snapToGrid}
           onSnapToGridToggle={() => { setSnapToGrid(v => { snapToGridRef.current = !v; return !v; }); }}
@@ -2065,12 +2159,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                         const aspect = img.naturalWidth / img.naturalHeight;
                         const w = Math.min(img.naturalWidth, 400);
                         const h = w / aspect;
+                        // Place at center of current GM viewport
+                        const wrap = wrapRef.current;
+                        const vp = vpRef.current;
+                        let cx = MAP_W / 2 - w / 2, cy = MAP_H / 2 - h / 2;
+                        if (wrap) {
+                          const center = screenToMap(wrap.offsetWidth / 2, wrap.offsetHeight / 2, vp);
+                          cx = center.x - w / 2;
+                          cy = center.y - h / 2;
+                        }
                         const newObj: MapObject = {
                           id,
                           name: asset.name,
                           src: asset.url,
-                          x: 100,
-                          y: 100,
+                          x: cx,
+                          y: cy,
                           w,
                           h,
                           rotation: 0,

@@ -75,6 +75,7 @@ export type SSEEventType =
   | 'fog:paint'
   | 'fog:snapshot'
   | 'fog:reset'
+  | 'fog:revealall'
   | 'box:reveal'
   | 'box:hide'
   | 'box:create'

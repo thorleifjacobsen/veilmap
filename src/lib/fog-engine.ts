@@ -2,8 +2,8 @@
 // All fog operations work on an offscreen canvas at map resolution.
 // GM sees fog at reduced opacity, players see it at full opacity.
 
-export const MAP_W = 2400;
-export const MAP_H = 1600;
+export const MAP_W = 7200;
+export const MAP_H = 4800;
 
 export function createFogCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -13,7 +13,7 @@ export function createFogCanvas(): HTMLCanvasElement {
   ctx.fillStyle = '#1a1a2e';
   ctx.fillRect(0, 0, MAP_W, MAP_H);
   // Add visible fog texture — subtle swirl pattern
-  for (let i = 0; i < 800; i++) {
+  for (let i = 0; i < 2400; i++) {
     const x = Math.random() * MAP_W;
     const y = Math.random() * MAP_H;
     const r = Math.random() * 80 + 20;
@@ -28,6 +28,10 @@ export function createFogCanvas(): HTMLCanvasElement {
     ctx.fill();
   }
   return c;
+}
+
+export function revealAllFog(ctx: CanvasRenderingContext2D) {
+  ctx.clearRect(0, 0, MAP_W, MAP_H);
 }
 
 export function paintReveal(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {

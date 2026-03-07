@@ -134,7 +134,16 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       }
     });
 
-    // Draw grid if enabled
+    ctx.restore();
+
+    // Draw fog at full opacity (also within clip)
+    ctx.save();
+    applyViewport(ctx, vp);
+    ctx.globalAlpha = 1.0;
+    ctx.drawImage(fogCanvas, 0, 0);
+    ctx.globalAlpha = 1;
+
+    // Draw grid above fog so it's always visible
     if (gridRef.current.show && gridRef.current.size > 0) {
       const gs = gridRef.current.size;
       ctx.strokeStyle = 'rgba(200,150,62,.12)';
@@ -146,15 +155,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(MAP_W, y); ctx.stroke();
       }
     }
-
-    ctx.restore();
-
-    // Draw fog at full opacity (also within clip)
-    ctx.save();
-    applyViewport(ctx, vp);
-    ctx.globalAlpha = 1.0;
-    ctx.drawImage(fogCanvas, 0, 0);
-    ctx.globalAlpha = 1;
 
     // Draw ping animations
     const now = Date.now();
@@ -290,6 +290,10 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
         }
         case 'fog:reset': {
           if (fogCtx) { fogCtx.fillStyle = '#1a1a2e'; fogCtx.fillRect(0, 0, MAP_W, MAP_H); }
+          break;
+        }
+        case 'fog:revealall': {
+          if (fogCtx) { fogCtx.clearRect(0, 0, MAP_W, MAP_H); }
           break;
         }
         case 'box:reveal': {
