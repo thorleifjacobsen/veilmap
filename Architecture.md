@@ -27,7 +27,7 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Clean dark slate on start — no default map, user uploads their base map as an object
 
 ### Fog of War
-- Reveal tool (`R`) — paint to clear fog with smooth 7-stop radial gradient
+- Reveal tool (`R`) — paint to clear fog with smooth radial gradient
 - Hide tool (`H`) — paint fog back with soft-edge gradient
 - Reset fog — covers entire map
 - Brush sizes 1–4 (keys `1` `2` `3` `4`)
@@ -35,11 +35,12 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Interpolated strokes — smooth fog paint even when zoomed out
 - Auto-reveal: painting inside an autoReveal box reveals the entire room
 - Fog snapshots saved every 10s + on mouse release
-- Wispy fog texture — subtle noise overlay on fog for atmospheric look
+- Fog color: #1a1a2e — visible contrast with map, atmospheric
 - Animated reveal — ease-out cubic expanding circles (350ms)
 
 ### Map Objects
-- Upload multiple images (PNG, JPG, WebP, GIF) as layered objects
+- Upload multiple images (PNG, JPG, WebP, GIF) as layered objects — stored as UUID files on disk
+- Asset library (📚) — browse all uploaded assets + global tokens, click to add
 - Photoshop-style layer panel with z-index ordering
 - Per-object: rename (double-click), GM visibility toggle (👁), player visibility toggle (📺), right-click context menu for lock/reorder/delete
 - Select objects on canvas with transform handles — move, scale from corners (9px handles), rotation support
@@ -49,6 +50,7 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Objects persisted in database (`map_objects` table) — survive page reload
 - Objects synced to player display in real-time via SSE `objects:update` event
 - Dual visibility: objects can be visible to GM only, player only, both, or neither
+- New objects default to hidden from player (visible to GM only)
 
 ### Camera Viewport
 - GM controls a draggable/resizable camera rectangle (`C` key)
@@ -68,21 +70,16 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Click to select (`S` key), right-click to edit/reveal/delete
 - Reveal All / Clear buttons in panel
 
-### Tokens (GM only)
-- Emoji palette with colored rings — quick placement on map
-- Click to place, drag to move, right-click to delete
-- Visible only in GM view — not projected to players
-
 ### Player Display
 - Fullscreen, no UI chrome
 - Shows exactly what's inside the GM's camera viewport
 - Strict camera clipping with black bars for non-matching areas
 - Map objects rendered with z-index ordering (player-visible only)
-- Fog at full opacity with wispy texture
+- Fog at full opacity
 - Vignette overlay for atmosphere
 - Grid overlay when enabled by GM
 - Ping animations visible on player display
-- Blackout mode (`X` key) — instant black screen with custom message
+- Blackout mode (`X` key) — HTML overlay (no canvas state loss), custom message
 - Prep mode with animated runes overlay
 - SSE connection with auto-reconnect on visibility change (tab focus)
 - Right-click disabled
@@ -92,9 +89,8 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Ruler tool (`M` key)
 - Shows distance in feet and grid squares
 
-### Ping & Torch
+### Ping
 - Ping (`P` key) — animated expanding rings visible on both GM and player views
-- Torch — flickering light effect on map
 
 ### Sessions & Persistence
 - Dashboard to create, list, delete sessions
@@ -104,6 +100,11 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Pro users: fog + map persisted to database, server-side uploads
 - 📺 Player button copies player URL to clipboard
 - Grid visibility setting persisted in database
+
+### Asset Library
+- Global token SVGs available to all users (pins, skull, star, shield, sword)
+- User-uploaded assets saved to library for reuse across sessions
+- Browse and add from library via 📚 button
 
 ### Auth
 - Register with email + password
@@ -120,7 +121,6 @@ Shortcuts shown as tooltips on hover in the toolbar.
 | `H` | Hide fog tool |
 | `B` | Draw polygon room (meta box) |
 | `S` | Select tool (objects + boxes) |
-| `T` | Token placement tool |
 | `P` | Ping tool |
 | `M` | Measure tool |
 | `G` | Toggle grid (right-click for submenu) |
@@ -136,10 +136,10 @@ Shortcuts shown as tooltips on hover in the toolbar.
 
 ## Data Model
 
-Five tables: `users`, `sessions`, `boxes`, `tokens`, `map_objects`.
+Five tables: `users`, `sessions`, `boxes`, `map_objects`, `asset_library`.
 
 - **users** — email, password hash, is_pro flag
 - **sessions** — slug, name, owner, map URL, fog snapshot, prep mode, display settings, camera viewport (x/y/w/h), show_grid
 - **boxes** — position, size, polygon points (JSON), type, name, color, notes, revealed state
-- **tokens** — emoji, color, position, label
-- **map_objects** — name, src (data URL), position, size, rotation, z_index, visible (GM), player_visible, locked
+- **map_objects** — name, src (file URL), position, size, rotation, z_index, visible (GM), player_visible (default false), locked
+- **asset_library** — owner, name, url, category (object/token), is_global flag
