@@ -63,6 +63,7 @@ model Box {
   notes      String   @default("")
   revealed   Boolean  @default(false)
   sort_order Int      @default(0)
+  points     Json?   @default("[]")
   created_at DateTime @default(now()) @db.Timestamptz(6)
 
   @@index([session_id], map: "idx_boxes_session")

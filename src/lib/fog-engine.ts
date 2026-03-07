@@ -74,16 +74,27 @@ export function paintHide(ctx: CanvasRenderingContext2D, x: number, y: number, r
   ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
 }
 
-export function revealBox(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number }) {
+export function revealBox(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number; points?: { x: number; y: number }[] }) {
   ctx.globalCompositeOperation = 'destination-out';
-  const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
-  const r = Math.max(box.w, box.h) * 0.78;
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  g.addColorStop(0, 'rgba(0,0,0,1)');
-  g.addColorStop(0.8, 'rgba(0,0,0,1)');
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(box.x - 6, box.y - 6, box.w + 12, box.h + 12);
+  if (box.points && box.points.length >= 3) {
+    ctx.beginPath();
+    ctx.moveTo(box.points[0].x, box.points[0].y);
+    for (let i = 1; i < box.points.length; i++) {
+      ctx.lineTo(box.points[i].x, box.points[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+    ctx.fill();
+  } else {
+    const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    const r = Math.max(box.w, box.h) * 0.78;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, 'rgba(0,0,0,1)');
+    g.addColorStop(0.8, 'rgba(0,0,0,1)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(box.x - 6, box.y - 6, box.w + 12, box.h + 12);
+  }
   ctx.globalCompositeOperation = 'source-over';
 }
 

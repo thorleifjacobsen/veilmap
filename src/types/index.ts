@@ -11,7 +11,9 @@ export type BoxType = PrismaBoxType;
 export type Box = Pick<
   PrismaBox,
   'id' | 'session_id' | 'name' | 'type' | 'x' | 'y' | 'w' | 'h' | 'color' | 'notes' | 'revealed' | 'sort_order'
->;
+> & {
+  points?: { x: number; y: number }[];
+};
 
 export type Token = Pick<PrismaToken, 'id' | 'session_id' | 'emoji' | 'color' | 'x' | 'y' | 'label'>;
 

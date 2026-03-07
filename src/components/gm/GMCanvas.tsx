@@ -125,6 +125,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const paintingRef = useRef(false);
   const paintUndoPushedRef = useRef(false);
   const drawStartRef = useRef<{ x: number; y: number } | null>(null);
+  const polyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const measureStartRef = useRef<MeasureState | null>(null);
   const mousePosRef = useRef({ x: 0, y: 0, mx: 0, my: 0 });
   const dragTokenRef = useRef<Token | null>(null);
@@ -460,7 +461,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       setMeasureInfo(null);
     }
 
-    // Box draw preview
+    // Box draw preview (rectangle drag)
     const ds = drawStartRef.current;
     if (toolRef.current === 'box' && ds) {
       const mp = mousePosRef.current;
@@ -485,6 +486,58 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(200,150,62,.4)';
       ctx.fillText(`${~~(sw / gs)}×${~~(sh / gs)}sq`, sx + sw / 2, sy + sh / 2);
+      ctx.restore();
+    }
+
+    // Polygon drawing preview
+    const pts = polyPointsRef.current;
+    if (toolRef.current === 'box' && pts.length > 0) {
+      const mp = mousePosRef.current;
+      const gs = gridSizeRef.current;
+      ctx.save();
+      applyViewport(ctx, vp);
+      ctx.strokeStyle = 'rgba(200,150,62,.75)';
+      ctx.lineWidth = 2 / vp.scale;
+      ctx.setLineDash([6 / vp.scale, 3 / vp.scale]);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i].x, pts[i].y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Line from last point to cursor
+      ctx.strokeStyle = 'rgba(200,150,62,.4)';
+      ctx.lineWidth = 1.5 / vp.scale;
+      ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
+      ctx.beginPath();
+      ctx.moveTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      ctx.lineTo(snap(mp.mx, gs), snap(mp.my, gs));
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw vertices
+      pts.forEach((p, i) => {
+        ctx.fillStyle = i === 0 ? 'rgba(200,150,62,.9)' : 'rgba(200,150,62,.6)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 4 / vp.scale, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Snap-close indicator when near first point
+      if (pts.length >= 3) {
+        const first = pts[0];
+        const snapDist = Math.hypot(snap(mp.mx, gs) - first.x, snap(mp.my, gs) - first.y);
+        if (snapDist < 15) {
+          ctx.strokeStyle = 'rgba(100,255,100,.6)';
+          ctx.lineWidth = 2 / vp.scale;
+          ctx.beginPath();
+          ctx.arc(first.x, first.y, 8 / vp.scale, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+
       ctx.restore();
     }
 
@@ -591,7 +644,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     const needs =
       torchesRef.current.length > 0 ||
       pingsRef.current.length > 0 ||
-      (toolRef.current === 'box' && drawStartRef.current) ||
+      (toolRef.current === 'box' && (drawStartRef.current || polyPointsRef.current.length > 0)) ||
       (toolRef.current === 'measure' && measureStartRef.current) ||
       (pendingTokenRef.current && toolRef.current === 'token') ||
       (toolRef.current === 'camera' && cameraDragRef.current);
@@ -835,6 +888,37 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     [session.id, showNotif, redrawBoxes, apiBoxCreate],
   );
 
+  const finalizePolygon = useCallback(
+    (pts: { x: number; y: number }[]) => {
+      if (pts.length < 3) { showNotif('Need at least 3 points'); return; }
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const minX = Math.min(...xs), minY = Math.min(...ys);
+      const maxX = Math.max(...xs), maxY = Math.max(...ys);
+      const w = maxX - minX, h = maxY - minY;
+      if (w < 10 || h < 10) { showNotif('Too small'); return; }
+      const newBox: Box = {
+        id: uuidv4(),
+        session_id: session.id,
+        x: minX, y: minY, w, h,
+        name: `Room ${boxNumRef.current++}`,
+        type: 'autoReveal',
+        color: BOX_COLORS[boxesRef.current.length % BOX_COLORS.length],
+        notes: '',
+        revealed: false,
+        sort_order: boxesRef.current.length,
+        points: pts,
+      };
+      const updated = [...boxesRef.current, newBox];
+      boxesRef.current = updated;
+      setBoxes(updated);
+      redrawBoxes();
+      setEditingBox(newBox);
+      setBoxEditorOpen(true);
+      apiBoxCreate(newBox);
+    },
+    [session.id, showNotif, redrawBoxes, apiBoxCreate],
+  );
+
   const clickSelect = useCallback(
     (mx: number, my: number) => {
       const tok = tokensRef.current.slice().reverse().find((t) => Math.hypot(t.x - mx, t.y - my) < 18);
@@ -948,6 +1032,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         brushRadiusRef.current = brushKeys[e.key];
       }
       if (e.key === 'Escape') {
+        polyPointsRef.current = [];
         pendingTokenRef.current = null;
         setContextMenu((prev) => ({ ...prev, open: false }));
         setBoxEditorOpen(false);
@@ -1099,7 +1184,23 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
 
       if (toolRef.current === 'box') {
-        drawStartRef.current = { x: mp.x, y: mp.y };
+        const gs = gridSizeRef.current;
+        const sx2 = snap(mp.x, gs), sy2 = snap(mp.y, gs);
+        const polyPts = polyPointsRef.current;
+
+        // Check if closing the polygon (click near first point)
+        if (polyPts.length >= 3) {
+          const first = polyPts[0];
+          if (Math.hypot(sx2 - first.x, sy2 - first.y) < 15) {
+            finalizePolygon(polyPts);
+            polyPointsRef.current = [];
+            drawTop();
+            return;
+          }
+        }
+
+        polyPts.push({ x: sx2, y: sy2 });
+        drawTop();
         return;
       }
       if (toolRef.current === 'measure') {
@@ -1129,7 +1230,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         paintFog(mp.x, mp.y, toolRef.current);
       }
     },
-    [getCanvasPos, placeToken, addPing, addTorch, setTool, clickSelect, pushUndo, paintFog, drawTop, drawGridMode],
+    [getCanvasPos, placeToken, addPing, addTorch, setTool, clickSelect, pushUndo, paintFog, drawTop, drawGridMode, finalizePolygon],
   );
 
   const handleMouseMove = useCallback(
@@ -1343,11 +1444,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
 
-      if (toolRef.current === 'box' && drawStartRef.current) {
-        finalizeBox(drawStartRef.current, mp);
-        drawStartRef.current = null;
-        drawTop();
-      }
       if (toolRef.current === 'measure') {
         measureStartRef.current = null;
         drawTop();
@@ -1359,7 +1455,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         sendFogSnapshot();
       }
     },
-    [getCanvasPos, drawTop, drawMap, drawGridMode, apiTokenMove, finalizeBox, sendFogSnapshot, broadcastCamera, showNotif],
+    [getCanvasPos, drawTop, drawMap, drawGridMode, apiTokenMove, sendFogSnapshot, broadcastCamera, showNotif],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1579,6 +1675,43 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           drawMap();
           showNotif(`Added: ${newObj.name}`);
           broadcastObjects(updated);
+        };
+        img.src = src;
+      };
+      reader.readAsDataURL(file);
+    },
+    [drawMap, showNotif, broadcastObjects],
+  );
+
+  const handleTokenUpload = useCallback(
+    (file: File) => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const src = ev.target?.result as string;
+        const img = new Image();
+        img.onload = () => {
+          const id = uuidv4();
+          const size = 48;
+          const newObj: MapObject = {
+            id,
+            name: `Token: ${file.name.replace(/\.[^.]+$/, '')}`,
+            src,
+            x: MAP_W / 2 - size / 2,
+            y: MAP_H / 2 - size / 2,
+            w: size,
+            h: size,
+            zIndex: objectsRef.current.length + 100,
+            visible: true,
+            locked: false,
+          };
+          objectImagesRef.current.set(id, img);
+          const updated = [...objectsRef.current, newObj];
+          objectsRef.current = updated;
+          setObjects(updated);
+          drawMap();
+          broadcastObjects(updated);
+          showNotif(`Token image added: ${newObj.name}`);
         };
         img.src = src;
       };
@@ -1881,6 +2014,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           onObjectUpdate={handleObjectUpdate}
           onObjectDelete={handleObjectDelete}
           onObjectReorder={handleObjectReorder}
+          onTokenUpload={handleTokenUpload}
         />
       </div>
 
@@ -2138,13 +2272,33 @@ function renderBox(
   const a = b.revealed ? 0.25 : 1;
   c.save();
   c.globalAlpha = a;
-  c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
-  c.fillRect(b.x, b.y, b.w, b.h);
-  c.strokeStyle = col;
-  c.lineWidth = (b.id === selectedBoxId ? 3 : 1.5) / scale;
-  if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
-  c.strokeRect(b.x, b.y, b.w, b.h);
-  c.setLineDash([]);
+
+  if (b.points && b.points.length >= 3) {
+    // Polygon room
+    c.beginPath();
+    c.moveTo(b.points[0].x, b.points[0].y);
+    for (let i = 1; i < b.points.length; i++) {
+      c.lineTo(b.points[i].x, b.points[i].y);
+    }
+    c.closePath();
+    c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
+    c.fill();
+    c.strokeStyle = col;
+    c.lineWidth = (b.id === selectedBoxId ? 3 : 1.5) / scale;
+    if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
+    c.stroke();
+    c.setLineDash([]);
+  } else {
+    // Rectangle room (original behavior)
+    c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
+    c.fillRect(b.x, b.y, b.w, b.h);
+    c.strokeStyle = col;
+    c.lineWidth = (b.id === selectedBoxId ? 3 : 1.5) / scale;
+    if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
+    c.strokeRect(b.x, b.y, b.w, b.h);
+    c.setLineDash([]);
+  }
+
   // Hazard hatching
   if (b.type === 'hazard' && !b.revealed) {
     c.strokeStyle = hexAlpha('#e05c2a', 0.12);

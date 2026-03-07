@@ -43,10 +43,12 @@ interface RightPanelProps {
   onObjectUpdate: (id: string, updates: Partial<MapObject>) => void;
   onObjectDelete: (id: string) => void;
   onObjectReorder: (id: string, direction: 'up' | 'down') => void;
+  onTokenUpload?: (file: File) => void;
 }
 
 export default function RightPanel({
   boxes,
+  tokens,
   objects,
   selectedBoxId,
   selectedObjectId,
@@ -63,10 +65,12 @@ export default function RightPanel({
   onObjectUpdate,
   onObjectDelete,
   onObjectReorder,
+  onTokenUpload,
 }: RightPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const tokenUploadRef = useRef<HTMLInputElement>(null);
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
   const [editNameValue, setEditNameValue] = useState('');
 
@@ -117,6 +121,15 @@ export default function RightPanel({
       reader.readAsText(f);
     },
     [onImport],
+  );
+
+  const handleTokenUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0];
+      if (f && onTokenUpload) onTokenUpload(f);
+      e.target.value = '';
+    },
+    [onTokenUpload],
   );
 
   const startEditName = (obj: MapObject) => {
@@ -325,7 +338,28 @@ export default function RightPanel({
 
       {/* Tokens section */}
       <PanelSection grow>
-        <PanelTitle>Tokens</PanelTitle>
+        <PanelTitle>
+          Tokens{' '}
+          <span className="ml-auto flex items-center gap-1">
+            <span className="text-[.58rem]" style={{ color: 'rgba(212,196,160,.4)' }}>
+              {tokens.length}
+            </span>
+          </span>
+        </PanelTitle>
+
+        {/* Placed tokens list */}
+        {tokens.length > 0 && (
+          <div className="mb-1 max-h-[80px] overflow-y-auto">
+            {tokens.map((t) => (
+              <div key={t.id} className="flex items-center gap-1 px-1 py-0.5 text-[.68rem] rounded hover:bg-[rgba(200,150,62,.05)]">
+                <span>{t.emoji}</span>
+                <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t.label || t.emoji}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Quick token palette (built-in) */}
         <div className="grid grid-cols-5 gap-1">
           {TOKEN_PALETTE.map((t) => (
             <div
@@ -336,11 +370,16 @@ export default function RightPanel({
                 background: 'rgba(0,0,0,.3)',
               }}
               onClick={() => onQueueToken(t.emoji, t.color)}
+              title={`Place ${t.emoji}`}
             >
               {t.emoji}
             </div>
           ))}
         </div>
+
+        {/* Upload custom token */}
+        <input ref={tokenUploadRef} type="file" accept="image/*" className="hidden" onChange={handleTokenUpload} />
+        <SmallBtn onClick={() => tokenUploadRef.current?.click()}>↑ Upload Token Image</SmallBtn>
         <SmallBtn red onClick={onClearTokens}>
           ✕ Clear Tokens
         </SmallBtn>

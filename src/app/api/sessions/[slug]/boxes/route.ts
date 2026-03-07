@@ -34,6 +34,7 @@ export async function POST(
       notes: body.notes || '',
       revealed: body.revealed || false,
       sort_order: body.sort_order || 0,
+      points: body.points || [],
     },
   });
 
@@ -41,6 +42,7 @@ export async function POST(
     id: b.id, session_id: b.session_id, name: b.name, type: b.type,
     x: b.x, y: b.y, w: b.w, h: b.h,
     color: b.color, notes: b.notes, revealed: b.revealed, sort_order: b.sort_order,
+    points: (b.points as { x: number; y: number }[] | null) || [],
   };
 
   broadcast(slug, { type: 'box:create', payload: box });
@@ -66,7 +68,7 @@ export async function PATCH(
   if (!boxId) return NextResponse.json({ error: 'Missing boxId' }, { status: 400 });
 
   const dbUpdates: Record<string, unknown> = {};
-  for (const key of ['name', 'type', 'color', 'notes', 'revealed', 'x', 'y', 'w', 'h']) {
+  for (const key of ['name', 'type', 'color', 'notes', 'revealed', 'x', 'y', 'w', 'h', 'points']) {
     if (updates[key] !== undefined) dbUpdates[key] = updates[key];
   }
 
