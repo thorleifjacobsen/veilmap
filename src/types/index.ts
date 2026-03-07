@@ -23,6 +23,19 @@ export interface Token {
   label: string;
 }
 
+export interface MapObject {
+  id: string;
+  name: string;
+  src: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  zIndex: number;
+  visible: boolean;
+  locked: boolean;
+}
+
 export interface Session {
   id: string;
   slug: string;
@@ -35,6 +48,14 @@ export interface Session {
   grid_size: number;
   boxes: Box[];
   tokens: Token[];
+  objects: MapObject[];
+}
+
+export interface CameraViewport {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface Viewport {
@@ -59,6 +80,8 @@ export type SSEEventType =
   | 'token:delete'
   | 'session:prep'
   | 'session:settings'
+  | 'session:blackout'
+  | 'camera:move'
   | 'ping';
 
 export interface SSEEvent {
@@ -85,9 +108,27 @@ export interface PrepPayload {
   message?: string;
 }
 
+export interface FogPaintBatchPayload {
+  strokes: FogPaintPayload[];
+}
+
+export interface BlackoutPayload {
+  active: boolean;
+  message?: string;
+}
+
+export interface CameraMovePayload {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface FullStatePayload {
   session: Session;
   fogPng: string | null;
+  objects: MapObject[];
+  camera: CameraViewport | null;
 }
 
 // Session export format for free users
@@ -96,6 +137,7 @@ export interface SessionExport {
   name: string;
   boxes: Omit<Box, 'id' | 'session_id'>[];
   tokens: Omit<Token, 'id' | 'session_id'>[];
+  objects: Omit<MapObject, 'id'>[];
   settings: {
     gm_fog_opacity: number;
     grid_size: number;
