@@ -18,11 +18,53 @@ export function paintReveal(ctx: CanvasRenderingContext2D, x: number, y: number,
   ctx.globalCompositeOperation = 'destination-out';
   const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
   g.addColorStop(0, 'rgba(0,0,0,1)');
-  g.addColorStop(0.65, 'rgba(0,0,0,0.9)');
+  g.addColorStop(0.3, 'rgba(0,0,0,1)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.85)');
+  g.addColorStop(0.75, 'rgba(0,0,0,0.5)');
+  g.addColorStop(0.9, 'rgba(0,0,0,0.15)');
   g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
+}
+
+export function animateReveal(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  radius: number,
+  onFrame?: () => void,
+) {
+  const duration = 300;
+  const start = performance.now();
+  const steps = 6;
+
+  function frame(now: number) {
+    const elapsed = now - start;
+    const progress = Math.min(elapsed / duration, 1);
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      if (t > progress) break;
+      const r = radius * (0.3 + t * 0.7);
+      const alpha = 1 - t * 0.3;
+      ctx.globalCompositeOperation = 'destination-out';
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(0,0,0,${alpha})`);
+      g.addColorStop(0.5, `rgba(0,0,0,${alpha * 0.7})`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    if (onFrame) onFrame();
+    if (progress < 1) requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
 }
 
 export function paintHide(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
