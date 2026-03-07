@@ -1,759 +1,195 @@
-# VeilMap — Architecture & Technical Specification
+# VeilMap — Product & Architecture Document
 
-> **For AI assistants (GitHub Copilot, Claude, etc.):**  
-> This document is the authoritative spec for VeilMap — a self-hosted SaaS DnD Fog of War tool.
-> When generating code, always follow the patterns, naming conventions, and data structures defined here.
-> Do not introduce Supabase, Firebase, or any managed BaaS. All backend is custom Node.js + PostgreSQL + WebSocket.
-
----
-
-## Product Overview
-
-VeilMap is a real-time collaborative map tool for tabletop RPG game masters.
-
-**Core flow:**
-1. GM logs in → creates a session → gets two URLs
-2. `veilmap.app/gm/[slug]` — GM view (laptop): draws fog, places tokens, manages meta boxes
-3. `veilmap.app/play/[slug]` — Player display (projector/TV): fullscreen, receives live updates, shows only revealed areas
-
-**Key differentiators vs. Roll20/Owlbear:**
-- Projector-first design (fullscreen display URL with no UI chrome)
-- Prep Mode: GM can prep next scene while players see a loading screen
-- Meta Box system: zones with types (autoReveal, trigger, hazard, note) that snap-reveal on brush contact
-- Self-hosted, no third-party services
+> This document describes what VeilMap is, how it is structured, and the decisions
+> behind the stack. It is written for developers and AI coding agents.
+> Implementation details are left to the agent — focus here is on intent and constraints.
 
 ---
 
-## Tech Stack
+## What is VeilMap?
 
-```
-Runtime:        Node.js 20+ (ESM)
-Framework:      Next.js 14 (App Router)
-Database:       PostgreSQL 15+ (via postgres.js — NOT pg, NOT Prisma)
-Realtime:       ws (native WebSocket server, sidecar to Next.js)
-Auth:           NextAuth.js v5 (credentials provider)
-Styling:        Tailwind CSS + CSS Modules for canvas UI
-Deployment:     Single VPS (Ubuntu) — Next.js + WS server as systemd services
-Reverse proxy:  Nginx (handles TLS, proxies /ws → WebSocket port)
-```
+VeilMap is a real-time Fog of War tool built for tabletop RPG game masters who run
+sessions with a physical projector or second screen.
 
-**Explicitly NOT used:** Supabase, Firebase, Pusher, Prisma, tRPC, GraphQL, Redux, React Query (use SWR if needed).
+The GM uses one browser window to control the map — painting fog, placing tokens,
+and managing rooms. A second URL, opened on the projector, shows players only what
+has been revealed. Everything syncs in real time.
 
 ---
 
-## Repository Structure
+## The Two Views
 
-```
-veilmap/
-├── apps/
-│   └── web/                          # Next.js app
-│       ├── app/
-│       │   ├── (auth)/
-│       │   │   ├── login/page.tsx
-│       │   │   └── register/page.tsx
-│       │   ├── dashboard/
-│       │   │   └── page.tsx          # Session list, create new session
-│       │   ├── gm/
-│       │   │   └── [slug]/
-│       │   │       └── page.tsx      # GM editor view
-│       │   ├── play/
-│       │   │   └── [slug]/
-│       │   │       └── page.tsx      # Player display (fullscreen, no nav)
-│       │   ├── api/
-│       │   │   ├── auth/[...nextauth]/route.ts
-│       │   │   ├── sessions/
-│       │   │   │   ├── route.ts          # GET (list), POST (create)
-│       │   │   │   └── [slug]/
-│       │   │   │       ├── route.ts      # GET, PATCH, DELETE
-│       │   │   │       ├── boxes/route.ts
-│       │   │   │       ├── tokens/route.ts
-│       │   │   │       └── fog/route.ts  # Save fog snapshot
-│       │   └── layout.tsx
-│       ├── components/
-│       │   ├── gm/
-│       │   │   ├── GMCanvas.tsx      # Main canvas orchestrator
-│       │   │   ├── Toolbar.tsx
-│       │   │   ├── RightPanel.tsx
-│       │   │   ├── BoxEditor.tsx     # Modal for editing meta boxes
-│       │   │   ├── SettingsModal.tsx
-│       │   │   └── ContextMenu.tsx
-│       │   ├── player/
-│       │   │   ├── PlayerCanvas.tsx  # Fullscreen display canvas
-│       │   │   └── PrepScreen.tsx    # Shown during prep mode
-│       │   └── ui/                   # Shared UI primitives
-│       ├── lib/
-│       │   ├── db.ts                 # postgres.js client (singleton)
-│       │   ├── ws-client.ts          # Browser WebSocket hook
-│       │   ├── fog-engine.ts         # Canvas fog logic (pure functions)
-│       │   ├── viewport.ts           # Pan/zoom math
-│       │   └── session-store.ts      # In-memory session state (server)
-│       └── types/
-│           └── index.ts              # All shared TypeScript types
-│
-├── server/
-│   └── ws-server.ts                  # Standalone WS server (Node.js)
-│
-├── db/
-│   ├── schema.sql                    # Full schema
-│   └── migrations/
-│       └── 001_initial.sql
-│
-├── nginx/
-│   └── veilmap.conf
-└── README.md
-```
+**GM View** — `/gm/[slug]`
+The control interface. Only accessible by the session owner. Used on the GM's laptop.
+Contains all tools: fog brush, meta boxes, token placement, settings, prep mode.
+
+**Player Display** — `/play/[slug]`
+Fullscreen, no UI chrome. Opened on the projector or TV.
+Receives live updates from the GM. Shows only what the GM has revealed.
+Anyone with the URL can open this — no login required.
 
 ---
 
-## Database Schema
+## Free vs Pro
 
-```sql
--- db/schema.sql
+The distinction is simple: **free users work in RAM, pro users get persistence.**
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+Free users have access to every feature during a session. When they close the browser,
+the session is gone. They can export their session setup (boxes, tokens, settings) as
+a JSON file and re-import it next time. The map image lives in their browser only.
 
-CREATE TABLE users (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  email        TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
-  created_at   TIMESTAMPTZ DEFAULT NOW()
-);
+Pro users get their fog state saved to the database automatically, their map image
+stored on the server, and their session survives page reloads and server restarts.
 
-CREATE TABLE sessions (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  slug         TEXT UNIQUE NOT NULL,          -- human-readable URL segment e.g. "krypt-av-azarath"
-  owner_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name         TEXT NOT NULL DEFAULT 'New Session',
-  map_url      TEXT,                          -- URL to uploaded map image (local /uploads/ or object storage)
-  map_width    INTEGER DEFAULT 2400,
-  map_height   INTEGER DEFAULT 1600,
-  fog_snapshot BYTEA,                         -- compressed PNG of fog canvas, saved on disconnect
-  prep_mode    BOOLEAN DEFAULT FALSE,
-  prep_message TEXT DEFAULT 'Preparing next scene…',
-  gm_fog_opacity REAL DEFAULT 0.5,
-  grid_size    INTEGER DEFAULT 32,
-  created_at   TIMESTAMPTZ DEFAULT NOW(),
-  updated_at   TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE boxes (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  session_id   UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  name         TEXT NOT NULL DEFAULT 'Room',
-  type         TEXT NOT NULL DEFAULT 'autoReveal'
-               CHECK (type IN ('autoReveal','trigger','hazard','note','hidden')),
-  x            REAL NOT NULL,
-  y            REAL NOT NULL,
-  w            REAL NOT NULL,
-  h            REAL NOT NULL,
-  color        TEXT DEFAULT '#c8963e',
-  notes        TEXT DEFAULT '',
-  meta_json    JSONB DEFAULT '{}',
-  revealed     BOOLEAN DEFAULT FALSE,
-  sort_order   INTEGER DEFAULT 0,
-  created_at   TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE tokens (
-  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  session_id   UUID NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-  emoji        TEXT NOT NULL,
-  color        TEXT NOT NULL DEFAULT '#e05c2a',
-  x            REAL NOT NULL,
-  y            REAL NOT NULL,
-  label        TEXT DEFAULT '',
-  created_at   TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Index for fast session lookups
-CREATE INDEX idx_boxes_session    ON boxes(session_id);
-CREATE INDEX idx_tokens_session   ON tokens(session_id);
-CREATE INDEX idx_sessions_slug    ON sessions(slug);
-CREATE INDEX idx_sessions_owner   ON sessions(owner_id);
-```
+There is no payment integration in the MVP. The `is_pro` flag on the user account
+is set manually for now.
 
 ---
 
-## TypeScript Types
+## Tech Stack & Reasoning
 
-```typescript
-// types/index.ts
+**Next.js 14 (App Router)**
+Standard choice. Handles routing, API, and server-side rendering in one place.
+No custom server setup — just `npm run dev` and `npm start`.
 
-export type BoxType = 'autoReveal' | 'trigger' | 'hazard' | 'note' | 'hidden';
+**PostgreSQL via postgres.js**
+Straightforward SQL, no ORM, no abstraction layer. The schema is simple enough
+that direct queries are cleaner than Prisma or similar tools.
 
-export interface Box {
-  id: string;
-  sessionId: string;
-  name: string;
-  type: BoxType;
-  x: number; y: number; w: number; h: number;
-  color: string;
-  notes: string;
-  metaJson: Record<string, unknown>;
-  revealed: boolean;
-  sortOrder: number;
-}
+**Server-Sent Events (SSE)**
+Used for pushing updates from the server to the player display in real time.
+SSE is one-directional (server → browser) which is exactly what we need —
+the player display never needs to send anything back.
+SSE works over standard HTTP, requires no special server setup, and is natively
+supported in Next.js Route Handlers.
+The GM sends fog paint operations to the server via regular POST requests
+(throttled to avoid flooding), and the server fans them out to all SSE listeners
+on that session slug.
 
-export interface Token {
-  id: string;
-  sessionId: string;
-  emoji: string;
-  color: string;
-  x: number; y: number;
-  label: string;
-}
+**In-memory session state**
+Active fog state is held in server RAM during a session. This means it is fast
+and requires no DB round-trip on every brush stroke. A full fog snapshot is
+persisted to the database periodically (every ~10 seconds) and on page unload —
+but only for pro users. Free users lose fog state on reload by design.
 
-export interface Session {
-  id: string;
-  slug: string;
-  ownerId: string;
-  name: string;
-  mapUrl: string | null;
-  mapWidth: number;
-  mapHeight: number;
-  prepMode: boolean;
-  prepMessage: string;
-  gmFogOpacity: number;
-  gridSize: number;
-  boxes: Box[];
-  tokens: Token[];
-}
+**NextAuth.js v5 — credentials provider**
+Email and password authentication. Simple, self-contained, no third-party OAuth
+needed for MVP.
 
-export interface ViewportState {
-  x: number;       // pan offset x (pixels)
-  y: number;       // pan offset y (pixels)
-  scale: number;   // zoom level (1.0 = 100%)
-}
+**Caddy**
+Reverse proxy. Handles HTTPS automatically when a domain is pointed at the server.
+No configuration needed for SSE — it is just HTTP. When running on IP only,
+Caddy listens on port 80 and forwards to Next.js on port 3000.
 
-// ── WebSocket Event Types ──────────────────────────────────────────────────
+**PM2**
+Keeps the Next.js process alive and restarts it after server reboots.
+One process, one port (3000), no complexity.
 
-export type WSEventType =
-  | 'fog:paint'
-  | 'fog:snapshot'
-  | 'fog:reset'
-  | 'box:reveal'
-  | 'box:hide'
-  | 'box:create'
-  | 'box:update'
-  | 'box:delete'
-  | 'token:move'
-  | 'token:create'
-  | 'token:delete'
-  | 'session:prep'
-  | 'session:settings'
-  | 'ping'
-  | 'connected'
-  | 'state:full';  // sent to new player connections with full current state
-
-export interface WSMessage {
-  type: WSEventType;
-  sessionSlug: string;
-  payload: unknown;
-}
-
-// Specific payloads
-export interface FogPaintPayload {
-  x: number; y: number;
-  radius: number;
-  mode: 'reveal' | 'hide';
-}
-
-export interface FogSnapshotPayload {
-  png: string;    // base64 encoded PNG of full fog canvas
-}
-
-export interface BoxRevealPayload {
-  boxId: string;
-}
-
-export interface TokenMovePayload {
-  tokenId: string;
-  x: number; y: number;
-}
-
-export interface PingPayload {
-  x: number; y: number;
-}
-
-export interface PrepPayload {
-  active: boolean;
-  message?: string;
-}
-
-export interface FullStatePayload {
-  session: Session;
-  fogPng: string | null;   // base64 current fog state
-}
-```
+**Map uploads → `/public/uploads/`**
+Next.js serves the `public/` folder statically out of the box.
+Storing uploads there means no extra static file server is needed.
+The folder is added to `.gitignore` so uploaded files are not committed to Git.
+This is a Pro-only feature — free users load their map locally in the browser
+without uploading it to the server.
 
 ---
 
-## WebSocket Server
+## Data Model
 
-```typescript
-// server/ws-server.ts
-// Run as a separate Node.js process alongside Next.js
-// Port: 3001 (proxied via Nginx from /ws)
+Four tables: `users`, `sessions`, `boxes`, `tokens`.
 
-import { WebSocketServer, WebSocket } from 'ws';
-import { db } from '../apps/web/lib/db.js';
+**users** — email, hashed password, is_pro flag.
 
-const PORT = 3001;
-const wss = new WebSocketServer({ port: PORT });
+**sessions** — belongs to a user. Has a unique slug (used in both URLs),
+a name, optional map URL (pro only), fog snapshot (pro only), prep mode state,
+and display settings like fog opacity and grid size.
 
-// In-memory rooms: slug → Set<WebSocket>
-const rooms = new Map<string, Set<WebSocket>>();
+**boxes** — the meta box system. Each box belongs to a session and has a position,
+size, type, name, color, notes, and a revealed flag. Types are:
+- `autoReveal` — brushing anywhere inside instantly reveals the whole box
+- `trigger` — same as autoReveal but also shows a GM note popup on reveal
+- `hazard` — visual danger zone marker, no reveal behavior
+- `note` — GM-only annotation, never shown on player display
+- `hidden` — invisible, used for scripting zones
 
-// In-memory fog state per session: slug → Buffer (PNG)
-const fogState = new Map<string, Buffer>();
-
-wss.on('connection', (ws, req) => {
-  // URL format: ws://host/ws?slug=session-slug&role=gm|player
-  const url = new URL(req.url!, `http://localhost`);
-  const slug = url.searchParams.get('slug');
-  const role = url.searchParams.get('role') as 'gm' | 'player';
-
-  if (!slug) { ws.close(1008, 'Missing slug'); return; }
-
-  // Join room
-  if (!rooms.has(slug)) rooms.set(slug, new Set());
-  rooms.get(slug)!.add(ws);
-
-  // Send full state to new connection
-  sendFullState(ws, slug);
-
-  ws.on('message', async (data) => {
-    const msg: WSMessage = JSON.parse(data.toString());
-
-    // Only GMs can send mutating events
-    if (role !== 'gm' && msg.type !== 'ping') return;
-
-    // Persist important state changes to DB
-    await persistEvent(msg);
-
-    // Broadcast to all OTHER clients in the room
-    broadcast(slug, msg, ws);
-  });
-
-  ws.on('close', () => {
-    rooms.get(slug)?.delete(ws);
-    if (rooms.get(slug)?.size === 0) rooms.delete(slug);
-  });
-});
-
-function broadcast(slug: string, msg: WSMessage, sender?: WebSocket) {
-  rooms.get(slug)?.forEach(client => {
-    if (client !== sender && client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(msg));
-    }
-  });
-}
-
-async function sendFullState(ws: WebSocket, slug: string) {
-  const session = await db`
-    SELECT s.*, 
-      json_agg(DISTINCT b.*) FILTER (WHERE b.id IS NOT NULL) as boxes,
-      json_agg(DISTINCT t.*) FILTER (WHERE t.id IS NOT NULL) as tokens
-    FROM sessions s
-    LEFT JOIN boxes b ON b.session_id = s.id
-    LEFT JOIN tokens t ON t.session_id = s.id
-    WHERE s.slug = ${slug}
-    GROUP BY s.id
-  `;
-  if (!session.length) return;
-
-  const fogPng = fogState.get(slug) ? fogState.get(slug)!.toString('base64') : null;
-
-  const payload: FullStatePayload = { session: session[0], fogPng };
-  ws.send(JSON.stringify({ type: 'state:full', sessionSlug: slug, payload }));
-}
-
-async function persistEvent(msg: WSMessage) {
-  const { type, sessionSlug, payload } = msg;
-  const p = payload as any;
-
-  switch(type) {
-    case 'fog:snapshot':
-      fogState.set(sessionSlug, Buffer.from(p.png, 'base64'));
-      await db`UPDATE sessions SET fog_snapshot=${Buffer.from(p.png,'base64')}, updated_at=NOW() WHERE slug=${sessionSlug}`;
-      break;
-    case 'box:reveal':
-      await db`UPDATE boxes SET revealed=TRUE WHERE id=${p.boxId}`;
-      break;
-    case 'box:hide':
-      await db`UPDATE boxes SET revealed=FALSE WHERE id=${p.boxId}`;
-      break;
-    case 'box:create':
-      await db`INSERT INTO boxes ${db(p.box)} ON CONFLICT DO NOTHING`;
-      break;
-    case 'box:update':
-      await db`UPDATE boxes SET ${db(p.updates)} WHERE id=${p.boxId}`;
-      break;
-    case 'box:delete':
-      await db`DELETE FROM boxes WHERE id=${p.boxId}`;
-      break;
-    case 'token:create':
-      await db`INSERT INTO tokens ${db(p.token)} ON CONFLICT DO NOTHING`;
-      break;
-    case 'token:move':
-      await db`UPDATE tokens SET x=${p.x}, y=${p.y} WHERE id=${p.tokenId}`;
-      break;
-    case 'token:delete':
-      await db`DELETE FROM tokens WHERE id=${p.tokenId}`;
-      break;
-    case 'session:prep':
-      await db`UPDATE sessions SET prep_mode=${p.active}, prep_message=${p.message??'Preparing…'} WHERE slug=${sessionSlug}`;
-      break;
-    case 'session:settings':
-      await db`UPDATE sessions SET gm_fog_opacity=${p.gmFogOpacity}, grid_size=${p.gridSize} WHERE slug=${sessionSlug}`;
-      break;
-  }
-}
-```
+**tokens** — emoji-based character/object markers. Belong to a session,
+have a position and a color ring.
 
 ---
 
-## Browser WebSocket Hook
+## Realtime Sync Strategy
 
-```typescript
-// lib/ws-client.ts
+The player display connects to an SSE endpoint for the session slug.
+On connection it immediately receives the full current state —
+fog snapshot, all boxes, all tokens, prep mode status.
 
-import { useEffect, useRef, useCallback } from 'react';
-import type { WSMessage } from '@/types';
+After that it receives incremental events as the GM acts:
+fog paint strokes, box reveals, token moves, ping locations, prep mode toggles.
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
+The GM client sends paint operations via POST, throttled to one request per 50ms.
+All other actions (box reveal, token move, etc.) are sent immediately as they happen.
 
-export function useSessionWS(slug: string, role: 'gm' | 'player', onMessage: (msg: WSMessage) => void) {
-  const ws = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
-
-  const connect = useCallback(() => {
-    ws.current = new WebSocket(`${WS_URL}/ws?slug=${slug}&role=${role}`);
-
-    ws.current.onmessage = (e) => {
-      try { onMessage(JSON.parse(e.data)); } catch {}
-    };
-
-    ws.current.onclose = () => {
-      // Reconnect after 2s
-      reconnectTimer.current = setTimeout(connect, 2000);
-    };
-  }, [slug, role, onMessage]);
-
-  useEffect(() => {
-    connect();
-    return () => {
-      clearTimeout(reconnectTimer.current);
-      ws.current?.close();
-    };
-  }, [connect]);
-
-  const send = useCallback((msg: WSMessage) => {
-    if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify(msg));
-    }
-  }, []);
-
-  return { send };
-}
-```
+Every 10 seconds, and when the GM navigates away, the client sends a full fog snapshot.
+This snapshot is kept in server memory so reconnecting players get the latest state.
+For pro users it is also saved to the database.
 
 ---
 
-## Fog Engine (Pure Functions)
+## Session Export / Import (Free Tier)
 
-```typescript
-// lib/fog-engine.ts
-// All fog operations work on an offscreen canvas at MAP resolution.
-// The GM view composites this with reduced opacity. The player view composites at full opacity.
-// Fog is serialized as a PNG blob and sent via WebSocket on mouseup / periodically.
+Export and import happen entirely in the browser — no server request involved.
 
-export const MAP_W = 2400;
-export const MAP_H = 1600;
-export const FOG_SAVE_INTERVAL_MS = 3000;
+Export serializes the session's boxes, tokens, and settings to a `.veilmap.json` file
+that the user downloads. Fog state is not exported — free users start with a blank
+fog each session.
 
-export function createFogCanvas(): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  c.width = MAP_W; c.height = MAP_H;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#080710';
-  ctx.fillRect(0, 0, MAP_W, MAP_H);
-  return c;
-}
-
-export function paintReveal(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
-  ctx.globalCompositeOperation = 'destination-out';
-  const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
-  g.addColorStop(0, 'rgba(0,0,0,1)');
-  g.addColorStop(0.65, 'rgba(0,0,0,0.9)');
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
-  ctx.globalCompositeOperation = 'source-over';
-}
-
-export function paintHide(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
-  ctx.fillStyle = '#080710';
-  ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
-}
-
-export function revealBox(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number }) {
-  ctx.globalCompositeOperation = 'destination-out';
-  const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
-  const r = Math.max(box.w, box.h) * 0.78;
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  g.addColorStop(0, 'rgba(0,0,0,1)');
-  g.addColorStop(0.8, 'rgba(0,0,0,1)');
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(box.x - 6, box.y - 6, box.w + 12, box.h + 12);
-  ctx.globalCompositeOperation = 'source-over';
-}
-
-export async function fogToBase64(fogCanvas: HTMLCanvasElement): Promise<string> {
-  return new Promise(resolve => {
-    fogCanvas.toBlob(blob => {
-      const reader = new FileReader();
-      reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      reader.readAsDataURL(blob!);
-    }, 'image/png', 0.9);
-  });
-}
-
-export function loadFogFromBase64(ctx: CanvasRenderingContext2D, base64: string): Promise<void> {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => { ctx.clearRect(0,0,MAP_W,MAP_H); ctx.drawImage(img,0,0); resolve(); };
-    img.src = 'data:image/png;base64,' + base64;
-  });
-}
-```
+Import reads a `.veilmap.json` file and restores boxes, tokens, and settings.
+The GM still needs to re-upload or re-select their map image.
 
 ---
 
-## Viewport Math
+## Fog Rendering
 
-```typescript
-// lib/viewport.ts
+Fog lives on an offscreen HTML canvas at the map's native resolution.
+This canvas is composited onto the screen using the current viewport transform.
 
-export interface Viewport { x: number; y: number; scale: number; }
+The GM sees the fog at a reduced, adjustable opacity so they can see the map
+underneath while painting. Players always see the fog at full opacity.
 
-export function screenToMap(sx: number, sy: number, vp: Viewport) {
-  return { x: (sx - vp.x) / vp.scale, y: (sy - vp.y) / vp.scale };
-}
+The fog canvas uses compositing operations to reveal areas (erasing the dark overlay)
+and hide them again (painting the dark overlay back). The box snap-reveal fills
+the entire box area at once instead of relying on brush strokes.
 
-export function mapToScreen(mx: number, my: number, vp: Viewport) {
-  return { x: mx * vp.scale + vp.x, y: my * vp.scale + vp.y };
-}
-
-export function zoomAt(vp: Viewport, sx: number, sy: number, factor: number, min=0.1, max=8): Viewport {
-  const newScale = Math.min(max, Math.max(min, vp.scale * factor));
-  return {
-    scale: newScale,
-    x: sx - (sx - vp.x) * (newScale / vp.scale),
-    y: sy - (sy - vp.y) * (newScale / vp.scale),
-  };
-}
-
-export function fitToContainer(mapW: number, mapH: number, cW: number, cH: number): Viewport {
-  const scale = Math.min(cW / mapW, cH / mapH) * 0.92;
-  return { scale, x: (cW - mapW * scale) / 2, y: (cH - mapH * scale) / 2 };
-}
-
-export function applyViewport(ctx: CanvasRenderingContext2D, vp: Viewport) {
-  ctx.setTransform(vp.scale, 0, 0, vp.scale, vp.x, vp.y);
-}
-```
+Undo is client-side only — a stack of fog canvas snapshots, maximum 20 deep.
 
 ---
 
-## API Routes
+## Viewport
 
-### `POST /api/sessions`
-Create a new session. Generates a unique slug.
+The map can be larger than the screen. Pan and zoom are handled client-side.
+Pan is triggered by holding Space and dragging, or with the middle mouse button.
+Zoom is triggered by scroll wheel, pinch gesture, or keyboard shortcuts.
 
-```typescript
-// Body: { name: string }
-// Returns: Session
-```
-
-### `GET /api/sessions/[slug]`
-Get full session with boxes and tokens.
-
-### `PATCH /api/sessions/[slug]`
-Update session settings (name, map_url, prep_mode, etc.)
-
-### `POST /api/sessions/[slug]/boxes`
-Create a box. Also broadcasts `box:create` via WS.
-
-### `PATCH /api/sessions/[slug]/boxes/[boxId]`
-Update box (name, type, notes, revealed, etc.)
-
-### `DELETE /api/sessions/[slug]/boxes/[boxId]`
-Delete a box.
-
-### `POST /api/sessions/[slug]/tokens`
-Create a token.
-
-### `PUT /api/sessions/[slug]/tokens/[tokenId]`
-Update token position.
-
-### `DELETE /api/sessions/[slug]/tokens/[tokenId]`
-Delete token.
-
-### `PUT /api/sessions/[slug]/fog`
-Save fog snapshot (called periodically by GM client and on disconnect).
-Body: `{ png: string }` (base64)
+All coordinates stored in the database and sent over the network are in
+map space (not screen space), so they are viewport-independent.
 
 ---
 
-## Nginx Config
+## UI Reference
 
-```nginx
-# nginx/veilmap.conf
-
-server {
-    listen 443 ssl;
-    server_name veilmap.app;
-
-    # Next.js app
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    # WebSocket upgrade
-    location /ws {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_read_timeout 86400;   # keep WS alive for long sessions
-    }
-
-    # Map image uploads (served directly)
-    location /uploads/ {
-        alias /var/www/veilmap/uploads/;
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-}
-```
+The file `fogofwar-v4.html` is a fully working single-file prototype of the GM view.
+It demonstrates all interactions, visual style, and canvas behavior.
+Use it as the visual and interaction reference when building the React components.
+Do not copy it verbatim — port the concepts into proper Next.js component structure.
 
 ---
 
-## Environment Variables
+## What Is Explicitly Out of Scope (MVP)
 
-```bash
-# .env.local
-
-DATABASE_URL=postgresql://veilmap:password@localhost:5432/veilmap
-NEXTAUTH_SECRET=your-secret-here
-NEXTAUTH_URL=https://veilmap.app
-NEXT_PUBLIC_WS_URL=wss://veilmap.app
-UPLOAD_DIR=/var/www/veilmap/uploads
-MAX_UPLOAD_SIZE_MB=20
-```
-
----
-
-## Key Implementation Notes for Copilot
-
-1. **Fog is offscreen at map resolution.** Never render fog directly at screen resolution — always paint to a `MAP_W × MAP_H` offscreen canvas, then composite onto screen via `drawImage` with the viewport transform.
-
-2. **GM view vs Player view fog:** Same fog canvas, different `globalAlpha`. GM sees `gmFogOpacity` (e.g. 0.5), players see 1.0.
-
-3. **Box snap-reveal:** When GM brushes in `reveal` mode, check if the brush center is inside any `autoReveal` or `trigger` box that isn't revealed. If yes, call `revealBox()` (which fills the whole box area) instead of painting the brush stroke.
-
-4. **Fog sync strategy:** Don't send fog on every mousemove — that's too much data. Instead:
-   - Send `fog:paint` events (x, y, radius, mode) in real-time (lightweight)
-   - Player reconstructs by replaying paint events on their own offscreen canvas
-   - Every 3 seconds (or on mouseup), send `fog:snapshot` with a full PNG (for reconnecting players)
-
-5. **Prep Mode:** When `prepMode === true`, the player display shows `PrepScreen` component instead of `PlayerCanvas`. The GM can freely edit the map. When toggled off, broadcast `session:prep` event with `active: false` and the player display switches back to live canvas.
-
-6. **Auth:** Only the session owner (by `owner_id`) can be the GM. Any unauthenticated user can access `/play/[slug]` as a viewer.
-
-7. **Slug generation:** Use `adjective-noun-number` format (e.g. `dark-forest-42`). Keep a wordlist in `lib/slug.ts`.
-
-8. **Upload strategy for MVP:** Store map images on local disk at `UPLOAD_DIR`. Serve via Nginx. No S3/object storage needed for MVP.
-
-9. **Token drag:** Tokens are dragged in map space. On `mouseup`, emit `token:move` WS event. During drag, only update local state (don't spam WS events per frame).
-
-10. **Undo:** Client-side only (no server-side undo). Keep a stack of fog canvas snapshots (max 20). Undo pops the stack and redraws the fog locally, then sends a full `fog:snapshot` to sync.
-
----
-
-## MVP Checklist
-
-### Auth & Sessions
-- [ ] Registration / Login with email + password (bcrypt)
-- [ ] Session creation with slug generation
-- [ ] Session list on dashboard
-- [ ] Delete session
-
-### Map
-- [ ] Upload map image (PNG/JPG/WEBP, max 20MB)
-- [ ] Drag-and-drop upload
-- [ ] Default dungeon map if no image uploaded
-- [ ] Pan (Space+drag, middle mouse drag)
-- [ ] Zoom (scroll wheel, pinch, +/- keys)
-- [ ] Fit-to-screen button
-
-### Fog
-- [ ] Reveal brush (variable size)
-- [ ] Hide brush
-- [ ] Reset fog
-- [ ] GM sees semi-transparent fog (adjustable opacity)
-- [ ] Player sees full-opacity fog
-- [ ] Undo (Ctrl+Z, client-side)
-
-### Meta Boxes
-- [ ] Draw box (drag)
-- [ ] Select & edit box (name, type, color, notes)
-- [ ] Types: autoReveal, trigger, hazard, note, hidden
-- [ ] Brush-inside snap-reveal for autoReveal & trigger
-- [ ] Reveal/hide single box from context menu
-- [ ] Delete box
-- [ ] Box list in right panel
-
-### Tokens
-- [ ] Place token (click to place from palette)
-- [ ] Drag to move token
-- [ ] Remove token (context menu)
-- [ ] Token types: ⚔️🧙🗡️✨🐉👺💀🔥
-
-### Realtime
-- [ ] GM fog brush events → player display
-- [ ] Box reveal/hide → player display
-- [ ] Token move → player display
-- [ ] Ping → player display
-- [ ] Prep mode toggle → player display
-- [ ] Reconnect on disconnect
-
-### Display
-- [ ] `/play/[slug]` fullscreen with no UI chrome
-- [ ] Prep Mode: override display with loading screen
-- [ ] Session name shown on player display
-- [ ] Vignette effect on player display
-
-### Misc
-- [ ] Right-click context menu on canvas
-- [ ] Keyboard shortcuts (R/H/B/S/T/P/M/G, Space+drag, Ctrl+Z)
-- [ ] Grid overlay toggle
-- [ ] Measure tool (feet & squares)
-- [ ] Settings modal (fog opacity, grid size, session name, prep message)
-
----
-
-## Post-MVP (v2)
-- Torch light sources with animated glow
-- Multiple map layers (battle map + overview)
-- Session history / fog undo server-side
-- Shareable session templates
-- Custom token images (upload)
-- Mobile GM view (touch-optimized)
-- SaaS billing (Stripe) + Pro tier
+- Payment or subscription management
+- Initiative tracker
+- Multiple map layers
+- Custom token images
+- Session sharing between users
+- Mobile-optimized GM view
+- Offline support
