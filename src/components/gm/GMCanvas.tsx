@@ -44,11 +44,37 @@ type ToolName = 'reveal' | 'hide' | 'gridReveal' | 'box' | 'select' | 'ping' | '
 interface Ping { x: number; y: number; born: number }
 interface MeasureState { sx: number; sy: number; mx: number; my: number }
 
+type UndoType =
+  | 'fog-paint'
+  | 'fog-grid-reveal'
+  | 'fog-reset'
+  | 'fog-revealall'
+  | 'object-add'
+  | 'object-move'
+  | 'object-resize'
+  | 'object-rotate'
+  | 'object-visibility'
+  | 'box-create'
+  | 'box-reveal'
+  | 'box-hide'
+  | 'box-delete';
+
+interface UndoEntry {
+  type: UndoType;
+  label: string;
+  fogBefore?: HTMLCanvasElement;
+  fogAfter?: HTMLCanvasElement;
+  objectsBefore?: MapObject[];
+  objectsAfter?: MapObject[];
+  boxesBefore?: Box[];
+  boxesAfter?: Box[];
+}
+
 const BOX_COLORS = ['#c8963e', '#e05c2a', '#6a4fc8', '#2a8a4a', '#c8300a', '#2a6a9a', '#888'];
 const TYPE_COLORS: Record<string, string> = {
   autoReveal: '#c8963e', trigger: '#a080e0', hazard: '#e05c2a', note: '#5aba6a', hidden: '#555',
 };
-const MAX_UNDO = 20;
+const MAX_UNDO = 50;
 const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a polygon
 const MIN_OBJECT_SIZE = 20; // px — minimum object width/height when resizing
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
@@ -145,7 +171,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const polyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const measureStartRef = useRef<MeasureState | null>(null);
   const mousePosRef = useRef({ x: 0, y: 0, mx: 0, my: 0 });
-  const undoStackRef = useRef<HTMLCanvasElement[]>([]);
+  const undoStackRef = useRef<UndoEntry[]>([]);
   const pingsRef = useRef<Ping[]>([]);
   const topLoopRef = useRef(false);
   const boxNumRef = useRef(1);
@@ -176,6 +202,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const selectedObjectIdRef = useRef<string | null>(null);
   const objectDragRef = useRef<{ objId: string; offsetX: number; offsetY: number } | null>(null);
   const objectResizeRef = useRef<{ objId: string; corner: string; startX: number; startY: number; origObj: MapObject } | null>(null);
+  const objectUndoBeforeRef = useRef<MapObject | null>(null);
   const snapToGridRef = useRef(false);
   const gridDrawStartRef = useRef<{ x: number; y: number } | null>(null);
   const gridRevealCellsRef = useRef<Set<string>>(new Set());
@@ -668,16 +695,28 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   // ── Fog operations ──
 
-  const pushUndo = useCallback(() => {
+  const snapFog = useCallback((): HTMLCanvasElement | null => {
     const fogCanvas = fogCanvasRef.current;
-    if (!fogCanvas) return;
+    if (!fogCanvas) return null;
     const snapC = document.createElement('canvas');
     snapC.width = MAP_W;
     snapC.height = MAP_H;
     snapC.getContext('2d')!.drawImage(fogCanvas, 0, 0);
-    undoStackRef.current.push(snapC);
+    return snapC;
+  }, []);
+
+  const pushUndoEntry = useCallback((entry: UndoEntry) => {
+    undoStackRef.current.push(entry);
     if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
   }, []);
+
+  /** Legacy fog-only push — captures fog before state for later completion */
+  const pushUndo = useCallback(() => {
+    const snap = snapFog();
+    if (!snap) return;
+    // Store as a fog-paint entry; the "after" state will be captured on mouseUp
+    pushUndoEntry({ type: 'fog-paint', label: 'fog paint', fogBefore: snap });
+  }, [snapFog, pushUndoEntry]);
 
   const undo = useCallback(() => {
     const stack = undoStackRef.current;
@@ -685,20 +724,56 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       showNotif('Nothing to undo');
       return;
     }
-    const snapC = stack.pop()!;
-    const fogCanvas = fogCanvasRef.current;
-    if (!fogCanvas) return;
-    const ctx = fogCanvas.getContext('2d')!;
-    ctx.clearRect(0, 0, MAP_W, MAP_H);
-    ctx.drawImage(snapC, 0, 0);
-    composeFogGM();
-    showNotif('↩ Undone');
-  }, [composeFogGM, showNotif]);
+    const entry = stack.pop()!;
+
+    // Restore fog state if present
+    if (entry.fogBefore) {
+      const fogCanvas = fogCanvasRef.current;
+      if (fogCanvas) {
+        const ctx = fogCanvas.getContext('2d')!;
+        ctx.clearRect(0, 0, MAP_W, MAP_H);
+        ctx.drawImage(entry.fogBefore, 0, 0);
+        composeFogGM();
+      }
+    }
+
+    // Restore objects state if present
+    if (entry.objectsBefore) {
+      objectsRef.current = entry.objectsBefore;
+      setObjects(entry.objectsBefore);
+      // Preload images for restored objects
+      entry.objectsBefore.forEach((obj) => {
+        if (!objectImagesRef.current.has(obj.id)) {
+          const img = new Image();
+          img.onload = () => { objectImagesRef.current.set(obj.id, img); drawMap(); };
+          img.src = obj.src;
+        }
+      });
+      drawMap();
+      drawTop();
+      // Broadcast restored objects
+      fetch(`/api/sessions/${slug}/fog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objects: entry.objectsBefore }),
+      }).catch(() => {});
+    }
+
+    // Restore boxes state if present
+    if (entry.boxesBefore) {
+      boxesRef.current = entry.boxesBefore;
+      setBoxes(entry.boxesBefore);
+      redrawBoxes();
+    }
+
+    showNotif(`↩ Undone: ${entry.label}`);
+  }, [composeFogGM, showNotif, drawMap, drawTop, redrawBoxes, slug]);
 
   const doRevealBox = useCallback(
     (box: Box) => {
       if (box.revealed) return;
-      pushUndo();
+      const fogSnap = snapFog();
+      const beforeBoxes = [...boxesRef.current];
       const fogCanvas = fogCanvasRef.current;
       if (!fogCanvas) return;
       const ctx = fogCanvas.getContext('2d')!;
@@ -717,12 +792,17 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
       apiBoxUpdate({ ...box, revealed: true });
       sendFogSnapshot();
+      if (fogSnap) {
+        pushUndoEntry({ type: 'box-reveal', label: `${box.name} revealed`, fogBefore: fogSnap, boxesBefore: beforeBoxes, boxesAfter: [...updatedBoxes] });
+      }
     },
-    [pushUndo, composeFogGM, redrawBoxes, showNotif, apiBoxUpdate, sendFogSnapshot],
+    [snapFog, pushUndoEntry, composeFogGM, redrawBoxes, showNotif, apiBoxUpdate, sendFogSnapshot],
   );
 
   const doHideBox = useCallback(
     (box: Box) => {
+      const fogSnap = snapFog();
+      const beforeBoxes = [...boxesRef.current];
       const fogCanvas = fogCanvasRef.current;
       if (!fogCanvas) return;
       const ctx = fogCanvas.getContext('2d')!;
@@ -736,8 +816,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       composeFogGM();
       redrawBoxes();
       apiBoxUpdate({ ...box, revealed: false });
+      if (fogSnap) {
+        pushUndoEntry({ type: 'box-hide', label: `${box.name} hidden`, fogBefore: fogSnap, boxesBefore: beforeBoxes, boxesAfter: [...updatedBoxes] });
+      }
     },
-    [composeFogGM, redrawBoxes, apiBoxUpdate],
+    [snapFog, pushUndoEntry, composeFogGM, redrawBoxes, apiBoxUpdate],
   );
 
   const paintFog = useCallback(
@@ -893,6 +976,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         revealed: false,
         sort_order: boxesRef.current.length,
       };
+      const beforeBoxes = [...boxesRef.current];
       const updated = [...boxesRef.current, newBox];
       boxesRef.current = updated;
       setBoxes(updated);
@@ -900,8 +984,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       setEditingBox(newBox);
       setBoxEditorOpen(true);
       apiBoxCreate(newBox);
+      pushUndoEntry({ type: 'box-create', label: `room created`, boxesBefore: beforeBoxes, boxesAfter: [...updated] });
     },
-    [session.id, showNotif, redrawBoxes, apiBoxCreate],
+    [session.id, showNotif, redrawBoxes, apiBoxCreate, pushUndoEntry],
   );
 
   const finalizePolygon = useCallback(
@@ -924,6 +1009,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         sort_order: boxesRef.current.length,
         points: pts,
       };
+      const beforeBoxes = [...boxesRef.current];
       const updated = [...boxesRef.current, newBox];
       boxesRef.current = updated;
       setBoxes(updated);
@@ -931,8 +1017,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       setEditingBox(newBox);
       setBoxEditorOpen(true);
       apiBoxCreate(newBox);
+      pushUndoEntry({ type: 'box-create', label: `room created`, boxesBefore: beforeBoxes, boxesAfter: [...updated] });
     },
-    [session.id, showNotif, redrawBoxes, apiBoxCreate],
+    [session.id, showNotif, redrawBoxes, apiBoxCreate, pushUndoEntry],
   );
 
   const clickSelect = useCallback(
@@ -1230,10 +1317,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           const hitCorner = corners.find(c => Math.abs(mp.x - c.x) < hs && Math.abs(mp.y - c.y) < hs);
           if (hitCorner && !selObj.locked) {
             objectResizeRef.current = { objId: selObj.id, corner: hitCorner.corner, startX: mp.x, startY: mp.y, origObj: { ...selObj } };
+            objectUndoBeforeRef.current = { ...selObj };
             return;
           }
           if (mp.x >= selObj.x && mp.x <= selObj.x + selObj.w && mp.y >= selObj.y && mp.y <= selObj.y + selObj.h && !selObj.locked) {
             objectDragRef.current = { objId: selObj.id, offsetX: mp.x - selObj.x, offsetY: mp.y - selObj.y };
+            objectUndoBeforeRef.current = { ...selObj };
             return;
           }
         }
@@ -1501,7 +1590,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
       if (objectDragRef.current) {
+        const dragObjId = objectDragRef.current.objId;
         objectDragRef.current = null;
+        // Record undo entry for object move
+        if (objectUndoBeforeRef.current) {
+          const afterObj = objectsRef.current.find(o => o.id === dragObjId);
+          if (afterObj) {
+            pushUndoEntry({
+              type: 'object-move',
+              label: 'object moved',
+              objectsBefore: objectsRef.current.map(o => o.id === dragObjId ? objectUndoBeforeRef.current! : o),
+              objectsAfter: [...objectsRef.current],
+            });
+          }
+          objectUndoBeforeRef.current = null;
+        }
         fetch(`/api/sessions/${slug}/fog`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1510,7 +1613,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
       if (objectResizeRef.current) {
+        const resizeObjId = objectResizeRef.current.objId;
         objectResizeRef.current = null;
+        // Record undo entry for object resize
+        if (objectUndoBeforeRef.current) {
+          const afterObj = objectsRef.current.find(o => o.id === resizeObjId);
+          if (afterObj) {
+            pushUndoEntry({
+              type: 'object-resize',
+              label: 'object resized',
+              objectsBefore: objectsRef.current.map(o => o.id === resizeObjId ? objectUndoBeforeRef.current! : o),
+              objectsAfter: [...objectsRef.current],
+            });
+          }
+          objectUndoBeforeRef.current = null;
+        }
         fetch(`/api/sessions/${slug}/fog`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1672,16 +1789,18 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
         case 'deleteBox':
           if (box) {
+            const beforeBoxes = [...boxesRef.current];
             const updated = boxesRef.current.filter((b) => b.id !== box.id);
             boxesRef.current = updated;
             setBoxes(updated);
             redrawBoxes();
             apiBoxDelete(box.id);
+            pushUndoEntry({ type: 'box-delete', label: `room "${box.name}" deleted`, boxesBefore: beforeBoxes, boxesAfter: [...updated] });
           }
           break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry],
   );
 
   // ── Box editor callbacks ──
@@ -1707,6 +1826,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const handleBoxDelete = useCallback(
     (id: string) => {
+      const beforeBoxes = [...boxesRef.current];
       const updated = boxesRef.current.filter((b) => b.id !== id);
       boxesRef.current = updated;
       setBoxes(updated);
@@ -1714,8 +1834,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       setEditingBox(null);
       redrawBoxes();
       apiBoxDelete(id);
+      pushUndoEntry({ type: 'box-delete', label: 'room deleted', boxesBefore: beforeBoxes, boxesAfter: [...updated] });
     },
-    [redrawBoxes, apiBoxDelete],
+    [redrawBoxes, apiBoxDelete, pushUndoEntry],
   );
 
   // ── Right panel callbacks ──
@@ -1822,12 +1943,19 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             locked: false,
           };
           objectImagesRef.current.set(id, img);
+          const beforeObjects = [...objectsRef.current];
           const updated = [...objectsRef.current, newObj];
           objectsRef.current = updated;
           setObjects(updated);
           drawMap();
           showNotif(`Added: ${newObj.name}`);
           broadcastObjects(updated);
+          pushUndoEntry({
+            type: 'object-add',
+            label: `added ${newObj.name}`,
+            objectsBefore: beforeObjects,
+            objectsAfter: [...updated],
+          });
         };
         img.src = url;
       } catch {
@@ -1839,6 +1967,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const handleObjectUpdate = useCallback(
     (id: string, updates: Partial<MapObject>) => {
+      const before = [...objectsRef.current];
       const updated = objectsRef.current.map((o) =>
         o.id === id ? { ...o, ...updates } : o,
       );
@@ -1846,20 +1975,28 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       setObjects(updated);
       drawMap();
       broadcastObjects(updated);
+      // Determine undo type from updates
+      let undoType: UndoType = 'object-visibility';
+      let label = 'object updated';
+      if ('rotation' in updates) { undoType = 'object-rotate'; label = 'object rotated'; }
+      else if ('visible' in updates || 'playerVisible' in updates) { undoType = 'object-visibility'; label = 'visibility toggled'; }
+      pushUndoEntry({ type: undoType, label, objectsBefore: before, objectsAfter: [...updated] });
     },
-    [drawMap, broadcastObjects],
+    [drawMap, broadcastObjects, pushUndoEntry],
   );
 
   const handleObjectDelete = useCallback(
     (id: string) => {
+      const before = [...objectsRef.current];
       const updated = objectsRef.current.filter((o) => o.id !== id);
       objectsRef.current = updated;
-      objectImagesRef.current.delete(id);
+      // Don't delete from objectImagesRef to allow undo
       setObjects(updated);
       drawMap();
       broadcastObjects(updated);
+      pushUndoEntry({ type: 'object-add', label: 'object deleted', objectsBefore: before, objectsAfter: [...updated] });
     },
-    [drawMap, broadcastObjects],
+    [drawMap, broadcastObjects, pushUndoEntry],
   );
 
   const handleObjectReorder = useCallback(
