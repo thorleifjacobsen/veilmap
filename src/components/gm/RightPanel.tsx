@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useCallback, useState, useEffect } from 'react';
-import type { Box, Token, MapObject, SessionExport } from '@/types';
+import type { Box, MapObject, SessionExport } from '@/types';
 
 const TYPE_COLORS: Record<string, string> = {
   autoReveal: '#c8963e',
@@ -13,7 +13,6 @@ const TYPE_COLORS: Record<string, string> = {
 
 interface RightPanelProps {
   boxes: Box[];
-  tokens: Token[];
   objects: MapObject[];
   selectedBoxId: string | null;
   selectedObjectId: string | null;
@@ -21,8 +20,6 @@ interface RightPanelProps {
   onBoxClick: (box: Box) => void;
   onRevealAll: () => void;
   onClearBoxes: () => void;
-  onQueueToken: (emoji: string, color: string) => void;
-  onClearTokens: () => void;
   onMapUpload: (file: File) => void;
   onExport: () => void;
   onImport: (data: SessionExport) => void;

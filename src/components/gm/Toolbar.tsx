@@ -1,6 +1,6 @@
 'use client';
 
-type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'token' | 'torch' | 'ping' | 'measure' | 'camera';
+type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
 
 const BRUSH_SIZES = [
   { radius: 15, dotSize: 8, key: '1' },
@@ -107,21 +107,8 @@ export default function Toolbar({
         />
       </ToolGroup>
 
-      {/* Place group */}
-      <ToolGroup label="Place">
-        <ToolBtn
-          icon={<TokenIcon />}
-          label="Token"
-          kbd="T"
-          active={activeTool === 'token'}
-          onClick={() => onToolChange('token')}
-        />
-        <ToolBtn
-          icon={<TorchIcon />}
-          label="Torch"
-          active={activeTool === 'torch'}
-          onClick={() => onToolChange('torch')}
-        />
+      {/* Tools group */}
+      <ToolGroup label="Tools">
         <ToolBtn
           icon={<PingIcon />}
           label="Ping"
@@ -265,23 +252,6 @@ function SelectIcon() {
   return (
     <svg {...svgProps}>
       <path d="M3 3l7 19 3-7 7-3L3 3z" />
-    </svg>
-  );
-}
-
-function TokenIcon() {
-  return (
-    <svg {...svgProps}>
-      <circle cx="12" cy="8" r="4" />
-      <path d="M6 20v-2a6 6 0 0112 0v2" />
-    </svg>
-  );
-}
-
-function TorchIcon() {
-  return (
-    <svg {...svgProps}>
-      <path d="M8.5 14.5A2.5 2.5 0 0011 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 11-14 0" />
     </svg>
   );
 }

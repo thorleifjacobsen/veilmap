@@ -3,7 +3,6 @@
 import type {
   Box as PrismaBox,
   BoxType as PrismaBoxType,
-  Token as PrismaToken,
 } from '@prisma/client';
 
 export type BoxType = PrismaBoxType;
@@ -14,8 +13,6 @@ export type Box = Pick<
 > & {
   points?: { x: number; y: number }[];
 };
-
-export type Token = Pick<PrismaToken, 'id' | 'session_id' | 'emoji' | 'color' | 'x' | 'y' | 'label'>;
 
 export interface MapObject {
   id: string;
@@ -30,6 +27,14 @@ export interface MapObject {
   visible: boolean;
   playerVisible: boolean;
   locked: boolean;
+}
+
+export interface AssetLibraryItem {
+  id: string;
+  name: string;
+  url: string;
+  category: string;
+  is_global: boolean;
 }
 
 export interface Session {
@@ -48,7 +53,6 @@ export interface Session {
   camera_w: number | null;
   camera_h: number | null;
   boxes: Box[];
-  tokens: Token[];
   objects: MapObject[];
 }
 
@@ -76,9 +80,6 @@ export type SSEEventType =
   | 'box:create'
   | 'box:update'
   | 'box:delete'
-  | 'token:create'
-  | 'token:move'
-  | 'token:delete'
   | 'session:prep'
   | 'session:settings'
   | 'session:blackout'
@@ -140,7 +141,6 @@ export interface SessionExport {
   version: 1;
   name: string;
   boxes: Omit<Box, 'id' | 'session_id'>[];
-  tokens: Omit<Token, 'id' | 'session_id'>[];
   objects: Omit<MapObject, 'id'>[];
   settings: {
     gm_fog_opacity: number;

@@ -8,7 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { Session, Box, Token, BoxType, SessionExport, MapObject, CameraViewport } from '@/types';
+import type { Session, Box, BoxType, SessionExport, MapObject, CameraViewport, AssetLibraryItem } from '@/types';
 import {
   MAP_W,
   MAP_H,
@@ -33,11 +33,9 @@ import ContextMenu, { type ContextMenuState } from './ContextMenu';
 
 // ── Types ──
 
-type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'token' | 'torch' | 'ping' | 'measure' | 'camera';
+type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
 
 interface Ping { x: number; y: number; born: number }
-interface Torch { x: number; y: number; r: number; id: number }
-interface PendingToken { emoji: string; color: string }
 interface MeasureState { sx: number; sy: number; mx: number; my: number }
 
 const BOX_COLORS = ['#c8963e', '#e05c2a', '#6a4fc8', '#2a8a4a', '#c8300a', '#2a6a9a', '#888'];
@@ -49,11 +47,9 @@ const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a
 const MIN_OBJECT_SIZE = 20; // px — minimum object width/height when resizing
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
   box: 'Click to place polygon vertices, click near first to close',
-  select: 'Click a box or token to select/edit — drag tokens to move',
+  select: 'Click a box to select/edit',
   measure: 'Drag to measure distance in feet & squares',
-  torch: 'Click to place a flickering torch',
   ping: 'Click to ping a location on player display',
-  token: 'Click on map to place token',
   camera: 'Drag to set camera viewport for player display',
 };
 
@@ -102,7 +98,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [prepMessage, setPrepMessage] = useState(session.prep_message || 'Preparing next scene…');
   const [sessionName, setSessionName] = useState(session.name);
   const [boxes, setBoxes] = useState<Box[]>(session.boxes || []);
-  const [tokens, setTokens] = useState<Token[]>(session.tokens || []);
   const [objects, setObjects] = useState<MapObject[]>(session.objects || []);
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
   const [editingBox, setEditingBox] = useState<Box | null>(null);
@@ -118,6 +113,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     open: false, x: 0, y: 0, mapX: 0, mapY: 0, box: null, token: null,
   });
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [libraryAssets, setLibraryAssets] = useState<AssetLibraryItem[]>([]);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [gridMenuOpen, setGridMenuOpen] = useState<{ x: number; y: number } | null>(null);
   const [drawGridMode, setDrawGridMode] = useState(false);
@@ -135,19 +132,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const polyPointsRef = useRef<{ x: number; y: number }[]>([]);
   const measureStartRef = useRef<MeasureState | null>(null);
   const mousePosRef = useRef({ x: 0, y: 0, mx: 0, my: 0 });
-  const dragTokenRef = useRef<Token | null>(null);
   const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const pendingTokenRef = useRef<PendingToken | null>(null);
   const undoStackRef = useRef<HTMLCanvasElement[]>([]);
   const pingsRef = useRef<Ping[]>([]);
-  const torchesRef = useRef<Torch[]>([]);
   const topLoopRef = useRef(false);
   const boxNumRef = useRef(1);
   const fogThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fogSnapshotTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const toolRef = useRef<ToolName>('reveal');
   const boxesRef = useRef<Box[]>(session.boxes || []);
-  const tokensRef = useRef<Token[]>(session.tokens || []);
   const objectsRef = useRef<MapObject[]>(session.objects || []);
   const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const gridSizeRef = useRef(session.grid_size || 32);
@@ -173,7 +166,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   // Keep refs in sync
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { boxesRef.current = boxes; }, [boxes]);
-  useEffect(() => { tokensRef.current = tokens; }, [tokens]);
   useEffect(() => { objectsRef.current = objects; }, [objects]);
   useEffect(() => { gridSizeRef.current = gridSize; }, [gridSize]);
   useEffect(() => { gmFogOpacityRef.current = gmFogOpacity; }, [gmFogOpacity]);
@@ -256,35 +248,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const apiBoxDelete = useCallback(
     (id: string) => {
       fetch(`/api/sessions/${slug}/boxes/${id}`, { method: 'DELETE' }).catch(() => {});
-    },
-    [slug],
-  );
-
-  const apiTokenCreate = useCallback(
-    (token: Token) => {
-      fetch(`/api/sessions/${slug}/tokens`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(token),
-      }).catch(() => {});
-    },
-    [slug],
-  );
-
-  const apiTokenMove = useCallback(
-    (token: Token) => {
-      fetch(`/api/sessions/${slug}/tokens/${token.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ x: token.x, y: token.y }),
-      }).catch(() => {});
-    },
-    [slug],
-  );
-
-  const apiTokenDelete = useCallback(
-    (id: string) => {
-      fetch(`/api/sessions/${slug}/tokens/${id}`, { method: 'DELETE' }).catch(() => {});
     },
     [slug],
   );
@@ -400,23 +363,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
     const now = Date.now();
 
-    // Torches
-    torchesRef.current.forEach((t) => {
-      const fl = 0.9 + Math.sin(now * 0.003 + t.id) * 0.1;
-      const g = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, t.r * fl);
-      g.addColorStop(0, 'rgba(255,180,60,.16)');
-      g.addColorStop(0.5, 'rgba(255,90,15,.06)');
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(t.x, t.y, t.r * fl, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.font = '18px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🕯️', t.x, t.y);
-    });
-
     // Pings
     pingsRef.current = pingsRef.current.filter((p) => now - p.born < 2400);
     pingsRef.current.forEach((p) => {
@@ -432,28 +378,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.beginPath();
       ctx.arc(p.x, p.y, r * 0.4, 0, Math.PI * 2);
       ctx.stroke();
-    });
-
-    // Tokens
-    tokensRef.current.forEach((t) => {
-      const r = 16;
-      ctx.shadowColor = 'rgba(0,0,0,.7)';
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = t.color;
-      ctx.beginPath();
-      ctx.arc(t.x, t.y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle =
-        t === dragTokenRef.current
-          ? 'rgba(255,220,80,.9)'
-          : 'rgba(255,220,140,.4)';
-      ctx.lineWidth = (t === dragTokenRef.current ? 2.5 : 1.5) / vp.scale;
-      ctx.stroke();
-      ctx.font = '13px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(t.emoji, t.x, t.y);
     });
 
     ctx.restore();
@@ -561,24 +485,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         }
       }
 
-      ctx.restore();
-    }
-
-    // Pending token ghost
-    if (pendingTokenRef.current && toolRef.current === 'token') {
-      const mp = mousePosRef.current;
-      ctx.save();
-      applyViewport(ctx, vp);
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = pendingTokenRef.current.color;
-      ctx.beginPath();
-      ctx.arc(mp.mx, mp.my, 16, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.font = '13px serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(pendingTokenRef.current.emoji, mp.mx, mp.my);
-      ctx.globalAlpha = 1;
       ctx.restore();
     }
 
@@ -693,11 +599,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
     // Animation loop
     const needs =
-      torchesRef.current.length > 0 ||
       pingsRef.current.length > 0 ||
       (toolRef.current === 'box' && (drawStartRef.current || polyPointsRef.current.length > 0)) ||
       (toolRef.current === 'measure' && measureStartRef.current) ||
-      (pendingTokenRef.current && toolRef.current === 'token') ||
       (toolRef.current === 'camera' && cameraDragRef.current) ||
       gridDrawStartRef.current;
     if (needs && !topLoopRef.current) {
@@ -854,36 +758,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       setToolState(t);
       toolRef.current = t;
       showHint(TOOL_HINTS[t] || '');
-      if (t !== 'token') pendingTokenRef.current = null;
       drawTop();
     },
     [showHint, drawTop],
-  );
-
-  // ── Token placement ──
-
-  const placeToken = useCallback(
-    (mx: number, my: number) => {
-      const pt = pendingTokenRef.current;
-      if (!pt) return;
-      const newToken: Token = {
-        id: uuidv4(),
-        session_id: session.id,
-        emoji: pt.emoji,
-        color: pt.color,
-        x: mx,
-        y: my,
-        label: pt.emoji,
-      };
-      const updated = [...tokensRef.current, newToken];
-      tokensRef.current = updated;
-      setTokens(updated);
-      pendingTokenRef.current = null;
-      setTool('reveal');
-      drawTop();
-      apiTokenCreate(newToken);
-    },
-    [session.id, setTool, drawTop, apiTokenCreate],
   );
 
   const addPing = useCallback(
@@ -894,15 +771,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       apiPing(mx, my);
     },
     [drawTop, showNotif, apiPing],
-  );
-
-  const addTorch = useCallback(
-    (mx: number, my: number) => {
-      torchesRef.current.push({ x: mx, y: my, r: 110, id: Date.now() });
-      drawTop();
-      showNotif('🕯 Torch placed');
-    },
-    [drawTop, showNotif],
   );
 
   // ── Box finalization ──
@@ -974,8 +842,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const clickSelect = useCallback(
     (mx: number, my: number) => {
-      const tok = tokensRef.current.slice().reverse().find((t) => Math.hypot(t.x - mx, t.y - my) < 18);
-      if (tok) return;
       const box = boxesRef.current.find(
         (b) => mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h,
       );
@@ -1109,7 +975,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       const keyMap: Record<string, ToolName> = {
-        r: 'reveal', h: 'hide', b: 'box', s: 'select', t: 'token', p: 'ping', m: 'measure', c: 'camera',
+        r: 'reveal', h: 'hide', b: 'box', s: 'select', p: 'ping', m: 'measure', c: 'camera',
       };
       const brushKeys: Record<string, number> = { '1': 15, '2': 36, '3': 70, '4': 130 };
       const k = e.key.toLowerCase();
@@ -1130,7 +996,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
       if (e.key === 'Escape') {
         polyPointsRef.current = [];
-        pendingTokenRef.current = null;
         setContextMenu((prev) => ({ ...prev, open: false }));
         setBoxEditorOpen(false);
         setSettingsOpen(false);
@@ -1232,12 +1097,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
 
-      // Token placement
-      if (toolRef.current === 'token' && pendingTokenRef.current) {
-        placeToken(mp.x, mp.y);
-        return;
-      }
-
       // Object selection, drag, and resize
       if (toolRef.current === 'select') {
         const selObj = selectedObjectIdRef.current ? objectsRef.current.find(o => o.id === selectedObjectIdRef.current) : null;
@@ -1270,16 +1129,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         setSelectedObjectId(null);
       }
 
-      // Token drag
-      if (toolRef.current === 'select' || toolRef.current === 'token') {
-        const tok = tokensRef.current.slice().reverse().find((t) => Math.hypot(t.x - mp.x, t.y - mp.y) < 18);
-        if (tok) {
-          dragTokenRef.current = tok;
-          dragOffsetRef.current = { x: mp.x - tok.x, y: mp.y - tok.y };
-          return;
-        }
-      }
-
       if (toolRef.current === 'box') {
         const gs = gridSizeRef.current;
         const sx2 = snap(mp.x, gs), sy2 = snap(mp.y, gs);
@@ -1309,10 +1158,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         setTool('reveal');
         return;
       }
-      if (toolRef.current === 'torch') {
-        addTorch(mp.x, mp.y);
-        return;
-      }
       if (toolRef.current === 'select') {
         clickSelect(mp.x, mp.y);
         return;
@@ -1327,7 +1172,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         paintFog(mp.x, mp.y, toolRef.current);
       }
     },
-    [getCanvasPos, placeToken, addPing, addTorch, setTool, clickSelect, pushUndo, paintFog, drawTop, drawGridMode, finalizePolygon],
+    [getCanvasPos, addPing, setTool, clickSelect, pushUndo, paintFog, drawTop, drawGridMode, finalizePolygon],
   );
 
   const handleMouseMove = useCallback(
@@ -1384,13 +1229,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         objectsRef.current = updated;
         setObjects(updated);
         drawMap();
-        drawTop();
-        return;
-      }
-
-      if (dragTokenRef.current) {
-        dragTokenRef.current.x = mp.x - dragOffsetRef.current.x;
-        dragTokenRef.current.y = mp.y - dragOffsetRef.current.y;
         drawTop();
         return;
       }
@@ -1456,7 +1294,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
 
-      if (['box', 'measure', 'select', 'token'].includes(toolRef.current) || gridDrawStartRef.current) {
+      if (['box', 'measure', 'select'].includes(toolRef.current) || gridDrawStartRef.current) {
         drawTop();
       }
     },
@@ -1485,13 +1323,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ objects: objectsRef.current }),
         }).catch(() => {});
-        return;
-      }
-      if (dragTokenRef.current) {
-        const tok = dragTokenRef.current;
-        dragTokenRef.current = null;
-        drawTop();
-        apiTokenMove(tok);
         return;
       }
       const { sx, sy } = getCanvasPos(e);
@@ -1552,12 +1383,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         sendFogSnapshot();
       }
     },
-    [getCanvasPos, drawTop, drawGridMode, apiTokenMove, sendFogSnapshot, broadcastCamera, showNotif, slug],
+    [getCanvasPos, drawTop, drawGridMode, sendFogSnapshot, broadcastCamera, showNotif, slug],
   );
 
   const handleMouseLeave = useCallback(() => {
     panningRef.current = false;
-    dragTokenRef.current = null;
     drawStartRef.current = null;
     measureStartRef.current = null;
     cameraDragRef.current = null;
@@ -1592,9 +1422,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const box = boxesRef.current.find(
         (b) => mp.x >= b.x && mp.x <= b.x + b.w && mp.y >= b.y && mp.y <= b.y + b.h,
       ) || null;
-      const token = tokensRef.current.slice().reverse().find(
-        (t) => Math.hypot(t.x - mp.x, t.y - mp.y) < 18,
-      ) || null;
+      const token = null;
       setContextMenu({
         open: true,
         x: e.clientX,
@@ -1626,9 +1454,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         case 'ping':
           addPing(mapX, mapY);
           break;
-        case 'torch':
-          addTorch(mapX, mapY);
-          break;
         case 'revealBox':
           if (box) doRevealBox(box);
           break;
@@ -1650,18 +1475,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             apiBoxDelete(box.id);
           }
           break;
-        case 'deleteToken':
-          if (token) {
-            const updated = tokensRef.current.filter((t) => t.id !== token.id);
-            tokensRef.current = updated;
-            setTokens(updated);
-            drawTop();
-            apiTokenDelete(token.id);
-          }
-          break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, addTorch, doRevealBox, doHideBox, redrawBoxes, drawTop, apiBoxDelete, apiTokenDelete],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, drawTop, apiBoxDelete],
   );
 
   // ── Box editor callbacks ──
@@ -1733,6 +1549,17 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     setGridMenuOpen({ x: e.clientX, y: e.clientY });
   }, []);
 
+  const openLibrary = useCallback(async () => {
+    try {
+      const res = await fetch('/api/library');
+      if (res.ok) {
+        const assets = await res.json();
+        setLibraryAssets(assets);
+      }
+    } catch { /* ignore */ }
+    setShowLibrary(true);
+  }, []);
+
   // Close grid context menu on click-away
   useEffect(() => {
     if (!gridMenuOpen) return;
@@ -1742,11 +1569,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   }, [gridMenuOpen]);
 
   const handleObjectAdd = useCallback(
-    (file: File) => {
+    async (file: File) => {
       if (!file.type.startsWith('image/')) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const src = ev.target?.result as string;
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/uploads', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error('Upload failed');
+        const { url } = await res.json();
         const img = new Image();
         img.onload = () => {
           const id = uuidv4();
@@ -1756,7 +1586,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           const newObj: MapObject = {
             id,
             name: file.name.replace(/\.[^.]+$/, ''),
-            src,
+            src: url,
             x: 100,
             y: 100,
             w,
@@ -1764,7 +1594,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             rotation: 0,
             zIndex: objectsRef.current.length,
             visible: true,
-            playerVisible: true,
+            playerVisible: false,
             locked: false,
           };
           objectImagesRef.current.set(id, img);
@@ -1775,49 +1605,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           showNotif(`Added: ${newObj.name}`);
           broadcastObjects(updated);
         };
-        img.src = src;
-      };
-      reader.readAsDataURL(file);
-    },
-    [drawMap, showNotif, broadcastObjects],
-  );
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleTokenUpload = useCallback(
-    (file: File) => {
-      if (!file.type.startsWith('image/')) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const src = ev.target?.result as string;
-        const img = new Image();
-        img.onload = () => {
-          const id = uuidv4();
-          const size = 48;
-          const newObj: MapObject = {
-            id,
-            name: `Token: ${file.name.replace(/\.[^.]+$/, '')}`,
-            src,
-            x: MAP_W / 2 - size / 2,
-            y: MAP_H / 2 - size / 2,
-            w: size,
-            h: size,
-            rotation: 0,
-            zIndex: objectsRef.current.length + 100,
-            visible: true,
-            playerVisible: true,
-            locked: false,
-          };
-          objectImagesRef.current.set(id, img);
-          const updated = [...objectsRef.current, newObj];
-          objectsRef.current = updated;
-          setObjects(updated);
-          drawMap();
-          broadcastObjects(updated);
-          showNotif(`Token image added: ${newObj.name}`);
-        };
-        img.src = src;
-      };
-      reader.readAsDataURL(file);
+        img.src = url;
+      } catch {
+        showNotif('Upload failed');
+      }
     },
     [drawMap, showNotif, broadcastObjects],
   );
@@ -1878,30 +1669,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     redrawBoxes();
   }, [redrawBoxes, apiBoxDelete]);
 
-  const handleQueueToken = useCallback(
-    (emoji: string, color: string) => {
-      pendingTokenRef.current = { emoji, color };
-      setTool('token');
-      showNotif(`Click map to place ${emoji}`);
-    },
-    [setTool, showNotif],
-  );
-
-  const handleClearTokens = useCallback(() => {
-    tokensRef.current.forEach((t) => apiTokenDelete(t.id));
-    tokensRef.current = [];
-    setTokens([]);
-    torchesRef.current = [];
-    drawTop();
-    showNotif('Tokens cleared');
-  }, [drawTop, showNotif, apiTokenDelete]);
-
   const handleExport = useCallback(() => {
     const data: SessionExport = {
       version: 1,
       name: sessionName,
       boxes: boxesRef.current.map(({ id: _, session_id: _s, ...rest }) => { void _; void _s; return rest; }),
-      tokens: tokensRef.current.map(({ id: _, session_id: _s, ...rest }) => { void _; void _s; return rest; }),
       objects: objectsRef.current.map(({ id: _, ...rest }) => { void _; return rest; }),
       settings: {
         gm_fog_opacity: gmFogOpacityRef.current,
@@ -1928,11 +1700,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         session_id: session.id,
         sort_order: b.sort_order ?? i,
       }));
-      const importedTokens: Token[] = data.tokens.map((t) => ({
-        ...t,
-        id: uuidv4(),
-        session_id: session.id,
-      }));
       const importedObjects: MapObject[] = (data.objects || []).map((o) => ({
         ...o,
         id: uuidv4(),
@@ -1940,10 +1707,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         playerVisible: (o as MapObject).playerVisible ?? true,
       }));
       boxesRef.current = importedBoxes;
-      tokensRef.current = importedTokens;
       objectsRef.current = importedObjects;
       setBoxes(importedBoxes);
-      setTokens(importedTokens);
       setObjects(importedObjects);
       // Preload object images
       importedObjects.forEach((obj) => {
@@ -1960,12 +1725,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         setSessionName(data.name);
       }
       importedBoxes.forEach((b) => apiBoxCreate(b));
-      importedTokens.forEach((t) => apiTokenCreate(t));
       broadcastObjects(importedObjects);
       redrawAll();
       showNotif('Session imported');
     },
-    [session.id, apiBoxCreate, apiTokenCreate, broadcastObjects, redrawAll, showNotif, drawMap],
+    [session.id, apiBoxCreate, broadcastObjects, redrawAll, showNotif, drawMap],
   );
 
   const handleResetView = useCallback(() => {
@@ -2107,7 +1871,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
         <RightPanel
           boxes={boxes}
-          tokens={tokens}
           objects={objects}
           selectedBoxId={selectedBoxId}
           selectedObjectId={selectedObjectId}
@@ -2115,8 +1878,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           onBoxClick={(b) => { setEditingBox(b); setBoxEditorOpen(true); setSelectedBoxId(b.id); }}
           onRevealAll={handleRevealAll}
           onClearBoxes={handleClearBoxes}
-          onQueueToken={handleQueueToken}
-          onClearTokens={handleClearTokens}
           onMapUpload={handleMapUpload}
           onExport={handleExport}
           onImport={handleImport}
@@ -2260,6 +2021,81 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {showLibrary && (
+        <div className="fixed inset-0 z-[800] flex items-center justify-center" onClick={() => setShowLibrary(false)}>
+          <div
+            className="rounded-lg border p-5 shadow-2xl"
+            style={{ background: '#100f18', borderColor: 'rgba(200,150,62,.3)', minWidth: 340, maxWidth: 520, maxHeight: '80vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-[.7rem] font-semibold tracking-[.1em]" style={{ fontFamily: "'Cinzel',serif", color: '#c8963e' }}>
+                ASSET LIBRARY
+              </div>
+              <button
+                className="cursor-pointer rounded border px-2 py-0.5 text-[.6rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
+                style={{ fontFamily: "'Cinzel',serif", borderColor: 'rgba(200,150,62,.2)', color: '#c8963e' }}
+                onClick={() => setShowLibrary(false)}
+              >
+                Close
+              </button>
+            </div>
+            {libraryAssets.length === 0 ? (
+              <div className="py-6 text-center text-[.65rem]" style={{ color: 'rgba(212,196,160,.4)' }}>
+                No assets yet. Upload files via the Objects panel.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-2 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+                {libraryAssets.map((asset) => (
+                  <div
+                    key={asset.id}
+                    className="cursor-pointer rounded border p-1 transition-all hover:border-[#c8963e] hover:bg-[rgba(200,150,62,.05)]"
+                    style={{ borderColor: 'rgba(200,150,62,.15)' }}
+                    onClick={() => {
+                      const img = new Image();
+                      img.onload = () => {
+                        const id = uuidv4();
+                        const aspect = img.naturalWidth / img.naturalHeight;
+                        const w = Math.min(img.naturalWidth, 400);
+                        const h = w / aspect;
+                        const newObj: MapObject = {
+                          id,
+                          name: asset.name,
+                          src: asset.url,
+                          x: 100,
+                          y: 100,
+                          w,
+                          h,
+                          rotation: 0,
+                          zIndex: objectsRef.current.length,
+                          visible: true,
+                          playerVisible: false,
+                          locked: false,
+                        };
+                        objectImagesRef.current.set(id, img);
+                        const updated = [...objectsRef.current, newObj];
+                        objectsRef.current = updated;
+                        setObjects(updated);
+                        drawMap();
+                        broadcastObjects(updated);
+                        showNotif(`Added: ${asset.name}`);
+                        setShowLibrary(false);
+                      };
+                      img.src = asset.url;
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={asset.url} alt={asset.name} className="h-[60px] w-full rounded object-cover" />
+                    <div className="mt-0.5 truncate text-[.55rem]" style={{ color: 'rgba(212,196,160,.6)' }}>
+                      {asset.name}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

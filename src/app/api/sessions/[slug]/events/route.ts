@@ -15,7 +15,6 @@ export async function GET(
     where: { slug },
     include: {
       boxes: true,
-      tokens: true,
       map_objects: { orderBy: { z_index: 'asc' } },
     },
   });
@@ -44,15 +43,6 @@ export async function GET(
       notes: b.notes,
       revealed: b.revealed,
       sort_order: b.sort_order,
-    })),
-    tokens: s.tokens.map((t) => ({
-      id: t.id,
-      session_id: t.session_id,
-      emoji: t.emoji,
-      color: t.color,
-      x: t.x,
-      y: t.y,
-      label: t.label,
     })),
     objects: s.map_objects.map((o) => ({
       id: o.id,
