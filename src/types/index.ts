@@ -25,8 +25,10 @@ export interface MapObject {
   y: number;
   w: number;
   h: number;
+  rotation: number;
   zIndex: number;
   visible: boolean;
+  playerVisible: boolean;
   locked: boolean;
 }
 
@@ -40,6 +42,11 @@ export interface Session {
   prep_message: string;
   gm_fog_opacity: number;
   grid_size: number;
+  show_grid: boolean;
+  camera_x: number | null;
+  camera_y: number | null;
+  camera_w: number | null;
+  camera_h: number | null;
   boxes: Box[];
   tokens: Token[];
   objects: MapObject[];
@@ -77,6 +84,7 @@ export type SSEEventType =
   | 'session:blackout'
   | 'camera:move'
   | 'objects:update'
+  | 'grid:update'
   | 'ping';
 
 export interface SSEEvent {
@@ -124,6 +132,7 @@ export interface FullStatePayload {
   fogPng: string | null;
   objects: MapObject[];
   camera: CameraViewport | null;
+  grid?: { show: boolean; size: number };
 }
 
 // Session export format for free users

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { subscribe, getFogState, getCameraState, getBlackoutState, getObjectsState } from '@/lib/sse';
+import { subscribe, getFogState, getCameraState, setCameraState, getBlackoutState, getObjectsState, setObjectsState } from '@/lib/sse';
 import type { SSEEvent } from '@/types';
 
 // GET /api/sessions/[slug]/events — SSE endpoint for player display
@@ -16,6 +16,7 @@ export async function GET(
     include: {
       boxes: true,
       tokens: true,
+      map_objects: { orderBy: { z_index: 'asc' } },
     },
   });
 
@@ -27,6 +28,9 @@ export async function GET(
     id: s.id, slug: s.slug, owner_id: s.owner_id, name: s.name,
     map_url: s.map_url, prep_mode: s.prep_mode, prep_message: s.prep_message,
     gm_fog_opacity: s.gm_fog_opacity, grid_size: s.grid_size,
+    show_grid: s.show_grid,
+    camera_x: s.camera_x, camera_y: s.camera_y,
+    camera_w: s.camera_w, camera_h: s.camera_h,
     boxes: s.boxes.map((b) => ({
       id: b.id,
       session_id: b.session_id,
@@ -50,6 +54,20 @@ export async function GET(
       y: t.y,
       label: t.label,
     })),
+    objects: s.map_objects.map((o) => ({
+      id: o.id,
+      name: o.name,
+      src: o.src,
+      x: o.x,
+      y: o.y,
+      w: o.w,
+      h: o.h,
+      rotation: o.rotation,
+      zIndex: o.z_index,
+      visible: o.visible,
+      playerVisible: o.player_visible,
+      locked: o.locked,
+    })),
   };
 
   const encoder = new TextEncoder();
@@ -57,12 +75,23 @@ export async function GET(
     start(controller) {
       // Send initial full state
       const fogPng = getFogState(slug);
-      const camera = getCameraState(slug);
+      const memCamera = getCameraState(slug);
+      // Fall back to DB camera if in-memory is null
+      const camera = memCamera ?? (s.camera_x != null && s.camera_y != null && s.camera_w != null && s.camera_h != null
+        ? { x: s.camera_x, y: s.camera_y, w: s.camera_w, h: s.camera_h }
+        : null);
+      // Initialize in-memory camera from DB on first connect
+      if (!memCamera && camera) setCameraState(slug, camera);
       const blackout = getBlackoutState(slug);
-      const objects = getObjectsState(slug);
+      // Use in-memory objects if available, otherwise from DB
+      let objects = getObjectsState(slug);
+      if (objects.length === 0 && sessionData.objects.length > 0) {
+        objects = sessionData.objects;
+        setObjectsState(slug, objects);
+      }
       const fullState: SSEEvent = {
         type: 'state:full',
-        payload: { session: { ...sessionData, objects }, fogPng, objects, camera, blackout },
+        payload: { session: { ...sessionData, objects }, fogPng, objects, camera, blackout, grid: { show: s.show_grid, size: s.grid_size } },
       };
       controller.enqueue(encoder.encode(`data: ${JSON.stringify(fullState)}\n\n`));
 

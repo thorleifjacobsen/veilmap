@@ -9,8 +9,23 @@ export function createFogCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = MAP_W; c.height = MAP_H;
   const ctx = c.getContext('2d')!;
+  // Base fog color — dark blue-black
   ctx.fillStyle = '#080710';
   ctx.fillRect(0, 0, MAP_W, MAP_H);
+  // Add subtle fog texture — wispy noise overlay
+  for (let i = 0; i < 4000; i++) {
+    const x = Math.random() * MAP_W;
+    const y = Math.random() * MAP_H;
+    const r = Math.random() * 40 + 5;
+    const a = Math.random() * 0.04;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(20,18,40,${a})`);
+    g.addColorStop(1, 'rgba(20,18,40,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
   return c;
 }
 
@@ -18,10 +33,11 @@ export function paintReveal(ctx: CanvasRenderingContext2D, x: number, y: number,
   ctx.globalCompositeOperation = 'destination-out';
   const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
   g.addColorStop(0, 'rgba(0,0,0,1)');
-  g.addColorStop(0.3, 'rgba(0,0,0,1)');
-  g.addColorStop(0.55, 'rgba(0,0,0,0.85)');
-  g.addColorStop(0.75, 'rgba(0,0,0,0.5)');
-  g.addColorStop(0.9, 'rgba(0,0,0,0.15)');
+  g.addColorStop(0.2, 'rgba(0,0,0,1)');
+  g.addColorStop(0.4, 'rgba(0,0,0,0.95)');
+  g.addColorStop(0.6, 'rgba(0,0,0,0.7)');
+  g.addColorStop(0.78, 'rgba(0,0,0,0.35)');
+  g.addColorStop(0.9, 'rgba(0,0,0,0.1)');
   g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
@@ -35,32 +51,29 @@ export function animateReveal(
   radius: number,
   onFrame?: () => void,
 ) {
-  const ANIMATION_DURATION_MS = 300;
-  const ANIMATION_STEPS = 6; // number of concentric gradient passes per frame
+  const ANIMATION_DURATION_MS = 350;
   const duration = ANIMATION_DURATION_MS;
   const start = performance.now();
-  const steps = ANIMATION_STEPS;
 
   function frame(now: number) {
     const elapsed = now - start;
     const progress = Math.min(elapsed / duration, 1);
+    // Ease out cubic for smoother reveal
+    const ease = 1 - Math.pow(1 - progress, 3);
+    const r = radius * (0.15 + ease * 0.85);
 
-    for (let i = 0; i < steps; i++) {
-      const t = i / steps;
-      if (t > progress) break;
-      const r = radius * (0.3 + t * 0.7);
-      const alpha = 1 - t * 0.3;
-      ctx.globalCompositeOperation = 'destination-out';
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-      g.addColorStop(0, `rgba(0,0,0,${alpha})`);
-      g.addColorStop(0.5, `rgba(0,0,0,${alpha * 0.7})`);
-      g.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalCompositeOperation = 'source-over';
-    }
+    ctx.globalCompositeOperation = 'destination-out';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(0,0,0,${0.6 + ease * 0.4})`);
+    g.addColorStop(0.3, `rgba(0,0,0,${0.5 + ease * 0.5})`);
+    g.addColorStop(0.6, `rgba(0,0,0,${0.2 + ease * 0.4})`);
+    g.addColorStop(0.85, `rgba(0,0,0,${ease * 0.15})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
 
     if (onFrame) onFrame();
     if (progress < 1) requestAnimationFrame(frame);
@@ -70,7 +83,11 @@ export function animateReveal(
 }
 
 export function paintHide(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
-  ctx.fillStyle = '#080710';
+  const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  g.addColorStop(0, '#080710');
+  g.addColorStop(0.7, '#080710');
+  g.addColorStop(1, 'rgba(8,7,16,0)');
+  ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
 }
 

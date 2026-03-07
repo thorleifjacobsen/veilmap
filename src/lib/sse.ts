@@ -7,7 +7,7 @@ interface SessionState {
   fogPng: string | null;
   camera: { x: number; y: number; w: number; h: number } | null;
   blackout: { active: boolean; message?: string } | null;
-  objects: Array<{ id: string; name: string; src: string; x: number; y: number; w: number; h: number; zIndex: number; visible: boolean; locked: boolean }>;
+  objects: Array<{ id: string; name: string; src: string; x: number; y: number; w: number; h: number; rotation: number; zIndex: number; visible: boolean; playerVisible: boolean; locked: boolean }>;
   listeners: Set<(event: SSEEvent) => void>;
 }
 

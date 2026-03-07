@@ -96,7 +96,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   // State
   const [tool, setToolState] = useState<ToolName>('reveal');
   const [brushRadius, setBrushRadius] = useState(36);
-  const [showGrid, setShowGrid] = useState(false);
+  const [showGrid, setShowGrid] = useState(session.show_grid ?? false);
   const [gmFogOpacity, setGmFogOpacity] = useState(session.gm_fog_opacity);
   const [gridSize, setGridSize] = useState(session.grid_size || 32);
   const [prepMessage, setPrepMessage] = useState(session.prep_message || 'Preparing next scene…');
@@ -153,9 +153,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const gridSizeRef = useRef(session.grid_size || 32);
   const gmFogOpacityRef = useRef(session.gm_fog_opacity);
   const brushRadiusRef = useRef(36);
-  const showGridRef = useRef(false);
+  const showGridRef = useRef(session.show_grid ?? false);
   const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
-  const cameraRef = useRef<CameraViewport>({ x: 0, y: 0, w: MAP_W, h: MAP_H });
+  const cameraRef = useRef<CameraViewport>(
+    session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null
+      ? { x: session.camera_x, y: session.camera_y, w: session.camera_w, h: session.camera_h }
+      : { x: 0, y: 0, w: MAP_W, h: MAP_H }
+  );
   const cameraDragRef = useRef<{ startX: number; startY: number } | null>(null);
   const cameraModeRef = useRef<CameraInteraction>('idle');
   const cameraGrabOffsetRef = useRef({ x: 0, y: 0 });
@@ -332,14 +336,26 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     if (customMapRef.current) {
       ctx.drawImage(customMapRef.current, 0, 0, MAP_W, MAP_H);
     } else {
-      drawDefaultMap(ctx);
+      // Clean slate: just a dark background — user uploads their base map as an object
+      ctx.fillStyle = '#0c0a08';
+      ctx.fillRect(0, 0, MAP_W, MAP_H);
     }
     // Draw map objects sorted by zIndex
     const sorted = [...objectsRef.current].sort((a, b) => a.zIndex - b.zIndex);
     sorted.forEach((obj) => {
       if (!obj.visible) return;
       const img = objectImagesRef.current.get(obj.id);
-      if (img) ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+      if (img) {
+        if (obj.rotation) {
+          ctx.save();
+          ctx.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
+          ctx.rotate((obj.rotation * Math.PI) / 180);
+          ctx.drawImage(img, -obj.w / 2, -obj.h / 2, obj.w, obj.h);
+          ctx.restore();
+        } else {
+          ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+        }
+      }
     });
     if (showGridRef.current) drawGridLines(ctx, gridSizeRef.current, vpRef.current.scale);
     ctx.restore();
@@ -615,12 +631,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         ctx.lineWidth = 2 / vp.scale;
         ctx.setLineDash([]);
         ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
-        const hs = 12 / vp.scale;
+        const hs = 9 / vp.scale;
         ctx.fillStyle = 'rgba(0,180,255,.9)';
         [[obj.x, obj.y], [obj.x + obj.w, obj.y], [obj.x, obj.y + obj.h], [obj.x + obj.w, obj.y + obj.h]].forEach(([cx, cy]) => {
           ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
         });
-        const ms = 10 / vp.scale;
+        const ms = 7 / vp.scale;
         [[obj.x + obj.w / 2, obj.y], [obj.x + obj.w / 2, obj.y + obj.h], [obj.x, obj.y + obj.h / 2], [obj.x + obj.w, obj.y + obj.h / 2]].forEach(([cx, cy]) => {
           ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
         });
@@ -891,6 +907,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   // ── Box finalization ──
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const finalizeBox = useCallback(
     (a: { x: number; y: number }, b: { x: number; y: number }) => {
       const gs = gridSizeRef.current;
@@ -1002,6 +1019,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       img.src = session.map_url;
     }
 
+    // Preload object images from DB
+    if (session.objects && session.objects.length > 0) {
+      session.objects.forEach((obj) => {
+        const img = new Image();
+        img.onload = () => { objectImagesRef.current.set(obj.id, img); drawMap(); };
+        img.src = obj.src;
+      });
+    }
+
     const w = wrapRef.current;
     if (w) {
       vpRef.current = fitToContainer(MAP_W, MAP_H, w.offsetWidth, w.offsetHeight);
@@ -1015,6 +1041,25 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
     // Periodic fog snapshot (every 10s)
     fogSnapshotTimerRef.current = setInterval(sendFogSnapshot, 10000);
+
+    // Broadcast DB-stored camera on mount so player gets it immediately
+    if (session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null) {
+      const cam = { x: session.camera_x, y: session.camera_y, w: session.camera_w, h: session.camera_h };
+      fetch(`/api/sessions/${slug}/fog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera: cam }),
+      }).catch(() => {});
+    }
+
+    // Broadcast DB-stored objects on mount so player gets them
+    if (session.objects && session.objects.length > 0) {
+      fetch(`/api/sessions/${slug}/fog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objects: session.objects }),
+      }).catch(() => {});
+    }
 
     showNotif('✦ Space+drag to pan · Scroll to zoom · Right-click for menu');
 
@@ -1032,6 +1077,22 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { composeFogGM(); }, [gmFogOpacity, composeFogGM]);
   // Redraw map when grid toggles or gridSize changes
   useEffect(() => { drawMap(); }, [showGrid, gridSize, drawMap]);
+
+  // Persist showGrid and broadcast to player when it changes
+  useEffect(() => {
+    fetch(`/api/sessions/${slug}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ show_grid: showGrid }),
+    }).catch(() => {});
+    // Broadcast grid state to players
+    fetch(`/api/sessions/${slug}/fog`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grid: { show: showGrid, size: gridSizeRef.current } }),
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGrid, slug]);
 
   // ── Keyboard ──
 
@@ -1181,7 +1242,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       if (toolRef.current === 'select') {
         const selObj = selectedObjectIdRef.current ? objectsRef.current.find(o => o.id === selectedObjectIdRef.current) : null;
         if (selObj) {
-          const hs = 18 / vpRef.current.scale;
+          const hs = 14 / vpRef.current.scale;
           const corners = [
             { corner: 'tl', x: selObj.x, y: selObj.y },
             { corner: 'tr', x: selObj.x + selObj.w, y: selObj.y },
@@ -1491,7 +1552,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         sendFogSnapshot();
       }
     },
-    [getCanvasPos, drawTop, drawMap, drawGridMode, apiTokenMove, sendFogSnapshot, broadcastCamera, showNotif],
+    [getCanvasPos, drawTop, drawGridMode, apiTokenMove, sendFogSnapshot, broadcastCamera, showNotif, slug],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -1700,8 +1761,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             y: 100,
             w,
             h,
+            rotation: 0,
             zIndex: objectsRef.current.length,
             visible: true,
+            playerVisible: true,
             locked: false,
           };
           objectImagesRef.current.set(id, img);
@@ -1719,6 +1782,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     [drawMap, showNotif, broadcastObjects],
   );
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleTokenUpload = useCallback(
     (file: File) => {
       if (!file.type.startsWith('image/')) return;
@@ -1737,8 +1801,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             y: MAP_H / 2 - size / 2,
             w: size,
             h: size,
+            rotation: 0,
             zIndex: objectsRef.current.length + 100,
             visible: true,
+            playerVisible: true,
             locked: false,
           };
           objectImagesRef.current.set(id, img);
@@ -1870,6 +1936,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const importedObjects: MapObject[] = (data.objects || []).map((o) => ({
         ...o,
         id: uuidv4(),
+        rotation: (o as MapObject).rotation ?? 0,
+        playerVisible: (o as MapObject).playerVisible ?? true,
       }));
       boxesRef.current = importedBoxes;
       tokensRef.current = importedTokens;
@@ -1893,10 +1961,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
       importedBoxes.forEach((b) => apiBoxCreate(b));
       importedTokens.forEach((t) => apiTokenCreate(t));
+      broadcastObjects(importedObjects);
       redrawAll();
       showNotif('Session imported');
     },
-    [session.id, apiBoxCreate, apiTokenCreate, redrawAll, showNotif, drawMap],
+    [session.id, apiBoxCreate, apiTokenCreate, broadcastObjects, redrawAll, showNotif, drawMap],
   );
 
   const handleResetView = useCallback(() => {
@@ -2214,74 +2283,6 @@ function HeaderBtn({ children, onClick }: { children: React.ReactNode; onClick: 
       {children}
     </button>
   );
-}
-
-function drawDefaultMap(c: CanvasRenderingContext2D) {
-  c.fillStyle = '#0c0a08';
-  c.fillRect(0, 0, MAP_W, MAP_H);
-  // Scatter noise dots
-  for (let i = 0; i < 3000; i++) {
-    const x = Math.random() * MAP_W, y = Math.random() * MAP_H;
-    c.fillStyle = `rgba(${100 + ~~(Math.random() * 40)},${80 + ~~(Math.random() * 30)},${55 + ~~(Math.random() * 20)},${Math.random() * 0.1})`;
-    c.beginPath();
-    c.arc(x, y, Math.random() * 2, 0, Math.PI * 2);
-    c.fill();
-  }
-  const rooms: [number, number, number, number, string][] = [
-    [160, 150, 580, 640, 'Entry Hall'], [950, 90, 520, 460, 'Guard Room'],
-    [1550, 60, 720, 680, 'Throne Room'], [950, 680, 520, 560, 'Armory'],
-    [1550, 820, 720, 620, 'The Vault'], [160, 950, 580, 470, 'Dungeon'],
-  ];
-  const corridors: [number, number, number, number, number][] = [
-    [740, 390, 950, 330, 90], [1470, 320, 1550, 320, 90],
-    [1210, 550, 1210, 680, 90], [1470, 990, 1550, 990, 90],
-    [740, 1100, 950, 930, 90],
-  ];
-  corridors.forEach(([x1, y1, x2, y2, hw]) => {
-    const dx = x2 - x1, dy = y2 - y1, l = Math.sqrt(dx * dx + dy * dy);
-    const nx = (-dy / l) * (hw / 2), ny = (dx / l) * (hw / 2);
-    c.fillStyle = '#1a1408';
-    c.beginPath();
-    c.moveTo(x1 + nx, y1 + ny);
-    c.lineTo(x2 + nx, y2 + ny);
-    c.lineTo(x2 - nx, y2 - ny);
-    c.lineTo(x1 - nx, y1 - ny);
-    c.closePath();
-    c.fill();
-    c.strokeStyle = '#282010';
-    c.lineWidth = 2;
-    c.stroke();
-  });
-  rooms.forEach(([rx, ry, rw, rh, label]) => {
-    const g = c.createRadialGradient(rx + rw / 2, ry + rh / 2, 0, rx + rw / 2, ry + rh / 2, Math.max(rw, rh) / 2);
-    g.addColorStop(0, '#2e2214');
-    g.addColorStop(1, '#160f06');
-    c.fillStyle = g;
-    c.fillRect(rx, ry, rw, rh);
-    c.strokeStyle = '#4e3218';
-    c.lineWidth = 4;
-    c.strokeRect(rx, ry, rw, rh);
-    c.strokeStyle = 'rgba(0,0,0,.5)';
-    c.lineWidth = 7;
-    c.strokeRect(rx + 3, ry + 3, rw - 6, rh - 6);
-    c.fillStyle = 'rgba(200,150,62,.15)';
-    c.font = `bold ${Math.min(rw, rh) * 0.08}px Cinzel,serif`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(label.toUpperCase(), rx + rw / 2, ry + rh / 2);
-  });
-  const emojis: [number, number, string][] = [
-    [390, 380, '🕯️'], [280, 650, '⚰️'], [1820, 240, '👑'], [2000, 450, '🗡️'],
-    [1210, 900, '🛡️'], [1900, 1050, '💎'], [400, 1100, '🔗'], [260, 1200, '💀'],
-  ];
-  emojis.forEach(([x, y, e]) => {
-    c.font = '22px serif';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.globalAlpha = 0.4;
-    c.fillText(e, x, y);
-    c.globalAlpha = 1;
-  });
 }
 
 function drawGridLines(c: CanvasRenderingContext2D, gridSize: number, scale: number) {

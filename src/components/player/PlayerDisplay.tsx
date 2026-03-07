@@ -17,6 +17,8 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const cameraRef = useRef<CameraViewport | null>(null);
   const objectsRef = useRef<MapObject[]>([]);
   const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const pingsRef = useRef<Array<{ x: number; y: number; born: number }>>([]);
+  const gridRef = useRef<{ show: boolean; size: number }>({ show: false, size: 32 });
   const [connected, setConnected] = useState(false);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
@@ -106,20 +108,44 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     ctx.save();
     applyViewport(ctx, vp);
 
-    // Draw map
+    // Draw map (clean slate if no custom map)
     if (mapImageRef.current) {
       ctx.drawImage(mapImageRef.current, 0, 0, MAP_W, MAP_H);
     } else {
-      drawDefaultMap(ctx);
+      ctx.fillStyle = '#0c0a08';
+      ctx.fillRect(0, 0, MAP_W, MAP_H);
     }
 
-    // Draw map objects sorted by zIndex
+    // Draw map objects sorted by zIndex (only player-visible ones)
     const sorted = [...objectsRef.current].sort((a, b) => a.zIndex - b.zIndex);
     sorted.forEach((obj) => {
-      if (!obj.visible) return;
+      if (!obj.visible || !obj.playerVisible) return;
       const img = objectImagesRef.current.get(obj.id);
-      if (img) ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+      if (img) {
+        if (obj.rotation) {
+          ctx.save();
+          ctx.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
+          ctx.rotate((obj.rotation * Math.PI) / 180);
+          ctx.drawImage(img, -obj.w / 2, -obj.h / 2, obj.w, obj.h);
+          ctx.restore();
+        } else {
+          ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+        }
+      }
     });
+
+    // Draw grid if enabled
+    if (gridRef.current.show && gridRef.current.size > 0) {
+      const gs = gridRef.current.size;
+      ctx.strokeStyle = 'rgba(200,150,62,.12)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= MAP_W; x += gs) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, MAP_H); ctx.stroke();
+      }
+      for (let y = 0; y <= MAP_H; y += gs) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(MAP_W, y); ctx.stroke();
+      }
+    }
 
     ctx.restore();
 
@@ -129,6 +155,27 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     ctx.globalAlpha = 1.0;
     ctx.drawImage(fogCanvas, 0, 0);
     ctx.globalAlpha = 1;
+
+    // Draw ping animations
+    const now = Date.now();
+    pingsRef.current = pingsRef.current.filter(p => now - p.born < 1500);
+    pingsRef.current.forEach((p) => {
+      const age = now - p.born;
+      const t = age / 1500;
+      const maxR = 60;
+      for (let i = 0; i < 3; i++) {
+        const rt = Math.max(0, t - i * 0.15);
+        if (rt <= 0) continue;
+        const r = rt * maxR;
+        const alpha = Math.max(0, 1 - rt) * 0.7;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(200,150,62,${alpha})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+    });
+
     ctx.restore();
 
     // Restore clip if applied
@@ -206,10 +253,19 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           }
           // Load objects from full state
           if (p.objects) loadObjectImages(p.objects);
-          // Set camera
+          // Set camera (from SSE state or DB values)
           if (p.camera) {
             cameraRef.current = p.camera;
             computeViewport();
+          } else if (p.session.camera_x != null && p.session.camera_y != null && p.session.camera_w != null && p.session.camera_h != null) {
+            cameraRef.current = { x: p.session.camera_x, y: p.session.camera_y, w: p.session.camera_w, h: p.session.camera_h };
+            computeViewport();
+          }
+          // Set grid state
+          if (p.grid) {
+            gridRef.current = p.grid;
+          } else if (p.session.show_grid !== undefined) {
+            gridRef.current = { show: p.session.show_grid, size: p.session.grid_size };
           }
           // Set blackout
           const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
@@ -314,7 +370,13 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           break;
         }
         case 'ping': {
-          // TODO: render ping animation
+          const p = event.payload as { x: number; y: number };
+          pingsRef.current.push({ x: p.x, y: p.y, born: Date.now() });
+          break;
+        }
+        case 'grid:update': {
+          const p = event.payload as { show: boolean; size: number };
+          gridRef.current = p;
           break;
         }
         case 'objects:update': {
@@ -386,24 +448,4 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       </div>
     </div>
   );
-}
-
-function drawDefaultMap(ctx: CanvasRenderingContext2D) {
-  ctx.fillStyle = '#0c0a08';
-  ctx.fillRect(0, 0, MAP_W, MAP_H);
-  const rooms: [number, number, number, number, string][] = [
-    [160, 150, 580, 640, 'Entry Hall'], [950, 90, 520, 460, 'Guard Room'],
-    [1550, 60, 720, 680, 'Throne Room'], [950, 680, 520, 560, 'Armory'],
-    [1550, 820, 720, 620, 'The Vault'], [160, 950, 580, 470, 'Dungeon'],
-  ];
-  rooms.forEach(([rx, ry, rw, rh, label]) => {
-    const g = ctx.createRadialGradient(rx + rw / 2, ry + rh / 2, 0, rx + rw / 2, ry + rh / 2, Math.max(rw, rh) / 2);
-    g.addColorStop(0, '#2e2214'); g.addColorStop(1, '#160f06');
-    ctx.fillStyle = g; ctx.fillRect(rx, ry, rw, rh);
-    ctx.strokeStyle = '#4e3218'; ctx.lineWidth = 4; ctx.strokeRect(rx, ry, rw, rh);
-    ctx.fillStyle = 'rgba(200,150,62,.15)';
-    ctx.font = `bold ${Math.min(rw, rh) * 0.08}px Cinzel, serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(label.toUpperCase(), rx + rw / 2, ry + rh / 2);
-  });
 }

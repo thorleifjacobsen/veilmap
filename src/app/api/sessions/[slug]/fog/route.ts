@@ -87,6 +87,17 @@ export async function POST(
   if (body.camera) {
     setCameraState(slug, body.camera);
     broadcast(slug, { type: 'camera:move', payload: body.camera });
+    // Persist camera to DB
+    await db.session.update({
+      where: { slug },
+      data: {
+        camera_x: body.camera.x,
+        camera_y: body.camera.y,
+        camera_w: body.camera.w,
+        camera_h: body.camera.h,
+        updated_at: new Date(),
+      },
+    });
   }
 
   // body.blackout broadcasts blackout state
@@ -95,10 +106,37 @@ export async function POST(
     broadcast(slug, { type: 'session:blackout', payload: body.blackout });
   }
 
-  // body.objects broadcasts objects update
+  // body.objects broadcasts objects update and persists to DB
   if (body.objects) {
     setObjectsState(slug, body.objects);
     broadcast(slug, { type: 'objects:update', payload: { objects: body.objects } });
+    // Persist objects to DB: delete all existing and re-create
+    const sessionId = sessionRow.id;
+    await db.mapObject.deleteMany({ where: { session_id: sessionId } });
+    if (body.objects.length > 0) {
+      await db.mapObject.createMany({
+        data: body.objects.map((o: { id: string; name: string; src: string; x: number; y: number; w: number; h: number; rotation?: number; zIndex: number; visible: boolean; playerVisible?: boolean; locked: boolean }) => ({
+          id: o.id,
+          session_id: sessionId,
+          name: o.name,
+          src: o.src,
+          x: o.x,
+          y: o.y,
+          w: o.w,
+          h: o.h,
+          rotation: o.rotation ?? 0,
+          z_index: o.zIndex,
+          visible: o.visible,
+          player_visible: o.playerVisible ?? true,
+          locked: o.locked,
+        })),
+      });
+    }
+  }
+
+  // body.grid broadcasts grid state to players
+  if (body.grid) {
+    broadcast(slug, { type: 'grid:update', payload: body.grid });
   }
 
   return NextResponse.json({ ok: true });

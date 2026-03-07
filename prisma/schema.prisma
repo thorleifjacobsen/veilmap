@@ -37,10 +37,16 @@ model Session {
   prep_message   String   @default("Preparing next scene…")
   gm_fog_opacity Float    @default(0.5) @db.Real
   grid_size      Int      @default(32)
+  show_grid      Boolean  @default(false)
+  camera_x       Float?   @db.Real
+  camera_y       Float?   @db.Real
+  camera_w       Float?   @db.Real
+  camera_h       Float?   @db.Real
   created_at     DateTime @default(now()) @db.Timestamptz(6)
   updated_at     DateTime @default(now()) @db.Timestamptz(6)
   boxes          Box[]
   tokens         Token[]
+  map_objects    MapObject[]
 
   @@index([owner_id], map: "idx_sessions_owner")
   @@index([slug], map: "idx_sessions_slug")
@@ -81,4 +87,25 @@ model Token {
 
   @@index([session_id], map: "idx_tokens_session")
   @@map("tokens")
+}
+
+model MapObject {
+  id              String   @id @default(uuid()) @db.Uuid
+  session_id      String   @db.Uuid
+  session         Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  name            String   @default("Object")
+  src             String
+  x               Float    @db.Real
+  y               Float    @db.Real
+  w               Float    @db.Real
+  h               Float    @db.Real
+  rotation        Float    @default(0) @db.Real
+  z_index         Int      @default(0)
+  visible         Boolean  @default(true)
+  player_visible  Boolean  @default(true)
+  locked          Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([session_id], map: "idx_map_objects_session")
+  @@map("map_objects")
 }
