@@ -217,7 +217,7 @@ export default function RightPanel({
                     value={editNameValue}
                     onChange={(e) => setEditNameValue(e.target.value)}
                     onBlur={commitEditName}
-                    onKeyDown={(e) => { if (e.key === 'Enter') commitEditName(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') commitEditName(); if (e.key === 'Escape') setEditingNameId(null); }}
                     autoFocus
                   />
                 ) : (
