@@ -82,6 +82,9 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     const vp = vpRef.current;
 
     ctx.clearRect(0, 0, W, H);
+    // Explicit black fill for letterboxing
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
     ctx.save();
     applyViewport(ctx, vp);
 

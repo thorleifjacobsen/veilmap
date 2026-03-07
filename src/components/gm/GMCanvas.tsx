@@ -70,6 +70,10 @@ function snap(v: number, gridSize: number) {
 
 // ── Component ──
 
+type CameraInteraction = 'idle' | 'dragging' | 'resizing-tl' | 'resizing-tr' | 'resizing-bl' | 'resizing-br' | 'drawing';
+type ResizeCorner = 'resizing-tl' | 'resizing-tr' | 'resizing-bl' | 'resizing-br';
+const MIN_CAMERA_SIZE = 30;
+
 export default function GMCanvas({ session, slug }: { session: Session; slug: string }) {
   // Canvas refs
   const canvasMapRef = useRef<HTMLCanvasElement>(null);
@@ -140,6 +144,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
   const cameraRef = useRef<CameraViewport>({ x: 0, y: 0, w: MAP_W, h: MAP_H });
   const cameraDragRef = useRef<{ startX: number; startY: number } | null>(null);
+  const cameraModeRef = useRef<CameraInteraction>('idle');
+  const cameraGrabOffsetRef = useRef({ x: 0, y: 0 });
   const blackoutActiveRef = useRef(false);
 
   // Keep refs in sync
@@ -499,23 +505,35 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.fillRect(0, cam.y + cam.h, MAP_W, MAP_H - cam.y - cam.h); // bottom
       ctx.fillRect(0, cam.y, cam.x, cam.h); // left
       ctx.fillRect(cam.x + cam.w, cam.y, MAP_W - cam.x - cam.w, cam.h); // right
-      // Camera border
-      ctx.strokeStyle = 'rgba(100,200,255,.6)';
+      // Camera border – solid cyan line, distinct from room boxes
+      ctx.strokeStyle = 'rgba(0,180,255,.8)';
       ctx.lineWidth = 2 / vp.scale;
-      ctx.setLineDash([6 / vp.scale, 4 / vp.scale]);
-      ctx.strokeRect(cam.x, cam.y, cam.w, cam.h);
       ctx.setLineDash([]);
-      // Corner label
-      ctx.fillStyle = 'rgba(100,200,255,.5)';
-      ctx.font = `${12 / vp.scale}px Cinzel,serif`;
+      ctx.strokeRect(cam.x, cam.y, cam.w, cam.h);
+      // Corner handles
+      const hs = 6 / vp.scale;
+      ctx.fillStyle = 'rgba(0,180,255,.9)';
+      ctx.fillRect(cam.x - hs / 2, cam.y - hs / 2, hs, hs);
+      ctx.fillRect(cam.x + cam.w - hs / 2, cam.y - hs / 2, hs, hs);
+      ctx.fillRect(cam.x - hs / 2, cam.y + cam.h - hs / 2, hs, hs);
+      ctx.fillRect(cam.x + cam.w - hs / 2, cam.y + cam.h - hs / 2, hs, hs);
+      // Label badge
+      const label = '📺 CAMERA';
+      const fontSize = 12 / vp.scale;
+      ctx.font = `bold ${fontSize}px Cinzel,serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText('📺 CAMERA', cam.x + 4 / vp.scale, cam.y + 4 / vp.scale);
+      const textW = ctx.measureText(label).width;
+      const pad = 4 / vp.scale;
+      ctx.fillStyle = 'rgba(0,0,0,.6)';
+      ctx.fillRect(cam.x, cam.y, textW + pad * 2, fontSize + pad * 2);
+      ctx.fillStyle = 'rgba(0,200,255,.95)';
+      ctx.fillText(label, cam.x + pad, cam.y + pad);
       ctx.restore();
     }
 
-    // Camera drag preview
-    if (toolRef.current === 'camera' && cameraDragRef.current) {
+    // Camera drag preview (drawing new camera)
+    if (toolRef.current === 'camera' && cameraModeRef.current === 'drawing' && cameraDragRef.current) {
       const mp = mousePosRef.current;
       const ds = cameraDragRef.current;
       ctx.save();
@@ -524,12 +542,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const cy = Math.min(ds.startY, mp.my);
       const cw = Math.abs(mp.mx - ds.startX);
       const ch = Math.abs(mp.my - ds.startY);
-      ctx.strokeStyle = 'rgba(100,200,255,.8)';
+      ctx.strokeStyle = 'rgba(0,180,255,.8)';
       ctx.lineWidth = 2 / vp.scale;
-      ctx.setLineDash([6 / vp.scale, 3 / vp.scale]);
-      ctx.strokeRect(cx, cy, cw, ch);
       ctx.setLineDash([]);
-      ctx.fillStyle = 'rgba(100,200,255,.05)';
+      ctx.strokeRect(cx, cy, cw, ch);
+      ctx.fillStyle = 'rgba(0,180,255,.05)';
       ctx.fillRect(cx, cy, cw, ch);
       ctx.restore();
     }
@@ -950,9 +967,43 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const { sx, sy } = getCanvasPos(e);
       const mp = screenToMap(sx, sy, vpRef.current);
 
-      // Camera tool
+      // Camera tool – drag, resize, or draw new
       if (toolRef.current === 'camera') {
-        cameraDragRef.current = { startX: mp.x, startY: mp.y };
+        const cam = cameraRef.current;
+        const hitRadius = 12 / vpRef.current.scale;
+        const isCustomCam = cam && !(cam.x === 0 && cam.y === 0 && cam.w === MAP_W && cam.h === MAP_H);
+
+        if (isCustomCam) {
+          // Check corner handles for resize
+          const corners: Array<{ cx: number; cy: number; mode: ResizeCorner }> = [
+            { cx: cam.x, cy: cam.y, mode: 'resizing-tl' },
+            { cx: cam.x + cam.w, cy: cam.y, mode: 'resizing-tr' },
+            { cx: cam.x, cy: cam.y + cam.h, mode: 'resizing-bl' },
+            { cx: cam.x + cam.w, cy: cam.y + cam.h, mode: 'resizing-br' },
+          ];
+          let hitCorner = false;
+          for (const c of corners) {
+            if (Math.abs(mp.x - c.cx) < hitRadius && Math.abs(mp.y - c.cy) < hitRadius) {
+              cameraModeRef.current = c.mode;
+              cameraGrabOffsetRef.current = { x: mp.x - c.cx, y: mp.y - c.cy };
+              hitCorner = true;
+              break;
+            }
+          }
+          if (!hitCorner && mp.x >= cam.x && mp.x <= cam.x + cam.w && mp.y >= cam.y && mp.y <= cam.y + cam.h) {
+            // Click inside camera → drag
+            cameraModeRef.current = 'dragging';
+            cameraGrabOffsetRef.current = { x: mp.x - cam.x, y: mp.y - cam.y };
+          } else if (!hitCorner) {
+            // Click outside camera → draw new
+            cameraModeRef.current = 'drawing';
+            cameraDragRef.current = { startX: mp.x, startY: mp.y };
+          }
+        } else {
+          // No custom camera yet → draw new
+          cameraModeRef.current = 'drawing';
+          cameraDragRef.current = { startX: mp.x, startY: mp.y };
+        }
         drawTop();
         return;
       }
@@ -1057,7 +1108,36 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
 
-      if (toolRef.current === 'camera' && cameraDragRef.current) {
+      if (toolRef.current === 'camera' && cameraModeRef.current !== 'idle') {
+        const cam = cameraRef.current;
+        if (cameraModeRef.current === 'dragging' && cam) {
+          cam.x = mp.x - cameraGrabOffsetRef.current.x;
+          cam.y = mp.y - cameraGrabOffsetRef.current.y;
+        } else if (cameraModeRef.current.startsWith('resizing') && cam) {
+          const mode = cameraModeRef.current;
+          if (mode === 'resizing-tl') {
+            const right = cam.x + cam.w;
+            const bottom = cam.y + cam.h;
+            cam.x = Math.min(mp.x, right - MIN_CAMERA_SIZE);
+            cam.y = Math.min(mp.y, bottom - MIN_CAMERA_SIZE);
+            cam.w = right - cam.x;
+            cam.h = bottom - cam.y;
+          } else if (mode === 'resizing-tr') {
+            const bottom = cam.y + cam.h;
+            cam.w = Math.max(MIN_CAMERA_SIZE, mp.x - cam.x);
+            cam.y = Math.min(mp.y, bottom - MIN_CAMERA_SIZE);
+            cam.h = bottom - cam.y;
+          } else if (mode === 'resizing-bl') {
+            const right = cam.x + cam.w;
+            cam.x = Math.min(mp.x, right - MIN_CAMERA_SIZE);
+            cam.w = right - cam.x;
+            cam.h = Math.max(MIN_CAMERA_SIZE, mp.y - cam.y);
+          } else if (mode === 'resizing-br') {
+            cam.w = Math.max(MIN_CAMERA_SIZE, mp.x - cam.x);
+            cam.h = Math.max(MIN_CAMERA_SIZE, mp.y - cam.y);
+          }
+        }
+        // 'drawing' mode uses cameraDragRef preview in drawTop
         drawTop();
         return;
       }
@@ -1085,20 +1165,30 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const { sx, sy } = getCanvasPos(e);
       const mp = screenToMap(sx, sy, vpRef.current);
 
-      // Camera tool: finalize camera rectangle
-      if (toolRef.current === 'camera' && cameraDragRef.current) {
-        const ds = cameraDragRef.current;
-        const cx = Math.min(ds.startX, mp.x);
-        const cy = Math.min(ds.startY, mp.y);
-        const cw = Math.abs(mp.x - ds.startX);
-        const ch = Math.abs(mp.y - ds.startY);
-        cameraDragRef.current = null;
-        if (cw > 30 && ch > 30) {
-          const cam: CameraViewport = { x: cx, y: cy, w: cw, h: ch };
-          cameraRef.current = cam;
-          broadcastCamera(cam);
-          showNotif('📺 Camera viewport set');
+      // Camera tool: finalize camera operation
+      if (toolRef.current === 'camera' && cameraModeRef.current !== 'idle') {
+        const mode = cameraModeRef.current;
+        if (mode === 'drawing' && cameraDragRef.current) {
+          const ds = cameraDragRef.current;
+          const cx = Math.min(ds.startX, mp.x);
+          const cy = Math.min(ds.startY, mp.y);
+          const cw = Math.abs(mp.x - ds.startX);
+          const ch = Math.abs(mp.y - ds.startY);
+          cameraDragRef.current = null;
+          if (cw > MIN_CAMERA_SIZE && ch > MIN_CAMERA_SIZE) {
+            const cam: CameraViewport = { x: cx, y: cy, w: cw, h: ch };
+            cameraRef.current = cam;
+            broadcastCamera(cam);
+            showNotif('📺 Camera viewport set');
+          }
+        } else if (mode === 'dragging' || mode.startsWith('resizing')) {
+          const cam = cameraRef.current;
+          if (cam) {
+            broadcastCamera(cam);
+            showNotif(mode === 'dragging' ? '📺 Camera moved' : '📺 Camera resized');
+          }
         }
+        cameraModeRef.current = 'idle';
         drawTop();
         return;
       }
