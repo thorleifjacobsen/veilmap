@@ -97,8 +97,8 @@ model MapObject {
 
 model AssetLibrary {
   id         String   @id @default(uuid()) @db.Uuid
-  owner_id   String   @db.Uuid
-  owner      User     @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  owner_id   String?  @db.Uuid
+  owner      User?    @relation(fields: [owner_id], references: [id], onDelete: Cascade)
   name       String
   url        String
   category   String   @default("object")

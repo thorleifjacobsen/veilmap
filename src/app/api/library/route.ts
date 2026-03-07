@@ -15,6 +15,13 @@ export async function GET() {
       ],
     },
     orderBy: [{ is_global: 'desc' }, { name: 'asc' }],
+    select: {
+      id: true,
+      name: true,
+      url: true,
+      category: true,
+      is_global: true,
+    },
   });
 
   return NextResponse.json(assets);

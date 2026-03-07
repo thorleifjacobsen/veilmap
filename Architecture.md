@@ -142,4 +142,4 @@ Five tables: `users`, `sessions`, `boxes`, `map_objects`, `asset_library`.
 - **sessions** — slug, name, owner, map URL, fog snapshot, prep mode, display settings, camera viewport (x/y/w/h), show_grid
 - **boxes** — position, size, polygon points (JSON), type, name, color, notes, revealed state
 - **map_objects** — name, src (file URL), position, size, rotation, z_index, visible (GM), player_visible (default false), locked
-- **asset_library** — owner, name, url, category (object/token), is_global flag
+- **asset_library** — owner (nullable for globals), name, url, category (object/token), is_global flag
