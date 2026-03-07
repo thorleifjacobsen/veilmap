@@ -79,12 +79,30 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const W = canvas.width, H = canvas.height;
-    const vp = vpRef.current;
 
+    // Full black background (letterboxing)
     ctx.clearRect(0, 0, W, H);
-    // Explicit black fill for letterboxing
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
+
+    const cam = cameraRef.current;
+    const vp = vpRef.current;
+
+    // If we have a custom camera, clip to the camera area on screen
+    const isCustomCam = cam && !(cam.x === 0 && cam.y === 0 && cam.w === MAP_W && cam.h === MAP_H);
+
+    if (isCustomCam) {
+      const screenX = vp.x + cam.x * vp.scale;
+      const screenY = vp.y + cam.y * vp.scale;
+      const screenW = cam.w * vp.scale;
+      const screenH = cam.h * vp.scale;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(screenX, screenY, screenW, screenH);
+      ctx.clip();
+    }
+
     ctx.save();
     applyViewport(ctx, vp);
 
@@ -105,13 +123,18 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
 
     ctx.restore();
 
-    // Draw fog at full opacity
+    // Draw fog at full opacity (also within clip)
     ctx.save();
     applyViewport(ctx, vp);
     ctx.globalAlpha = 1.0;
     ctx.drawImage(fogCanvas, 0, 0);
     ctx.globalAlpha = 1;
     ctx.restore();
+
+    // Restore clip if applied
+    if (isCustomCam) {
+      ctx.restore();
+    }
 
     rafRef.current = requestAnimationFrame(render);
   }, []);
