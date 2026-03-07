@@ -4,7 +4,10 @@
 import type { SSEEvent } from '@/types';
 
 interface SessionState {
-  fogPng: string | null; // base64 fog snapshot held in RAM
+  fogPng: string | null;
+  camera: { x: number; y: number; w: number; h: number } | null;
+  blackout: { active: boolean; message?: string } | null;
+  objects: Array<{ id: string; name: string; src: string; x: number; y: number; w: number; h: number; zIndex: number; visible: boolean; locked: boolean }>;
   listeners: Set<(event: SSEEvent) => void>;
 }
 
@@ -12,7 +15,7 @@ const sessions = new Map<string, SessionState>();
 
 function getSession(slug: string): SessionState {
   if (!sessions.has(slug)) {
-    sessions.set(slug, { fogPng: null, listeners: new Set() });
+    sessions.set(slug, { fogPng: null, camera: null, blackout: null, objects: [], listeners: new Set() });
   }
   return sessions.get(slug)!;
 }
@@ -58,4 +61,31 @@ export function getFogState(slug: string): string | null {
 /** Get listener count for a session */
 export function getListenerCount(slug: string): number {
   return sessions.get(slug)?.listeners.size ?? 0;
+}
+
+export function setCameraState(slug: string, camera: { x: number; y: number; w: number; h: number }) {
+  const state = getSession(slug);
+  state.camera = camera;
+}
+
+export function getCameraState(slug: string): { x: number; y: number; w: number; h: number } | null {
+  return sessions.get(slug)?.camera ?? null;
+}
+
+export function setBlackoutState(slug: string, blackout: { active: boolean; message?: string } | null) {
+  const state = getSession(slug);
+  state.blackout = blackout;
+}
+
+export function getBlackoutState(slug: string): { active: boolean; message?: string } | null {
+  return sessions.get(slug)?.blackout ?? null;
+}
+
+export function setObjectsState(slug: string, objects: SessionState['objects']) {
+  const state = getSession(slug);
+  state.objects = objects;
+}
+
+export function getObjectsState(slug: string): SessionState['objects'] {
+  return sessions.get(slug)?.objects ?? [];
 }

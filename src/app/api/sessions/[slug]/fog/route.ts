@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { auth } from '@/lib/auth';
-import { broadcast, setFogState } from '@/lib/sse';
+import { broadcast, setFogState, setCameraState, setBlackoutState } from '@/lib/sse';
 
 // PUT /api/sessions/[slug]/fog — save fog snapshot and broadcast
 export async function PUT(
@@ -68,6 +68,18 @@ export async function POST(
   // body.ping sends a ping event
   if (body.ping) {
     broadcast(slug, { type: 'ping', payload: body.ping });
+  }
+
+  // body.camera broadcasts camera viewport update
+  if (body.camera) {
+    setCameraState(slug, body.camera);
+    broadcast(slug, { type: 'camera:move', payload: body.camera });
+  }
+
+  // body.blackout broadcasts blackout state
+  if (body.blackout !== undefined) {
+    setBlackoutState(slug, body.blackout.active ? body.blackout : null);
+    broadcast(slug, { type: 'session:blackout', payload: body.blackout });
   }
 
   return NextResponse.json({ ok: true });

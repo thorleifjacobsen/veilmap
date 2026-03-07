@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { subscribe, getFogState } from '@/lib/sse';
+import { subscribe, getFogState, getCameraState, getBlackoutState, getObjectsState } from '@/lib/sse';
 import type { SSEEvent } from '@/types';
 
 // GET /api/sessions/[slug]/events — SSE endpoint for player display
@@ -51,9 +51,12 @@ export async function GET(
     start(controller) {
       // Send initial full state
       const fogPng = getFogState(slug);
+      const camera = getCameraState(slug);
+      const blackout = getBlackoutState(slug);
+      const objects = getObjectsState(slug);
       const fullState: SSEEvent = {
         type: 'state:full',
-        payload: { session: sessionData, fogPng },
+        payload: { session: { ...sessionData, objects }, fogPng, objects, camera, blackout },
       };
       controller.enqueue(encoder.encode(`data: ${JSON.stringify(fullState)}\n\n`));
 
