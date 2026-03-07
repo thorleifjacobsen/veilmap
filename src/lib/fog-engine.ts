@@ -9,18 +9,19 @@ export function createFogCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = MAP_W; c.height = MAP_H;
   const ctx = c.getContext('2d')!;
-  // Base fog color — dark blue-black
-  ctx.fillStyle = '#080710';
+  // Base fog color — dark with slight blue tint
+  ctx.fillStyle = '#1a1a2e';
   ctx.fillRect(0, 0, MAP_W, MAP_H);
-  // Add subtle fog texture — wispy noise overlay
-  for (let i = 0; i < 4000; i++) {
+  // Add visible fog texture — subtle swirl pattern
+  for (let i = 0; i < 800; i++) {
     const x = Math.random() * MAP_W;
     const y = Math.random() * MAP_H;
-    const r = Math.random() * 40 + 5;
-    const a = Math.random() * 0.04;
+    const r = Math.random() * 80 + 20;
+    const a = Math.random() * 0.08 + 0.02;
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, `rgba(20,18,40,${a})`);
-    g.addColorStop(1, 'rgba(20,18,40,0)');
+    g.addColorStop(0, `rgba(40,38,70,${a})`);
+    g.addColorStop(0.5, `rgba(30,28,55,${a * 0.5})`);
+    g.addColorStop(1, 'rgba(26,26,46,0)');
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -84,9 +85,9 @@ export function animateReveal(
 
 export function paintHide(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
   const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
-  g.addColorStop(0, '#080710');
-  g.addColorStop(0.7, '#080710');
-  g.addColorStop(1, 'rgba(8,7,16,0)');
+  g.addColorStop(0, '#1a1a2e');
+  g.addColorStop(0.7, '#1a1a2e');
+  g.addColorStop(1, 'rgba(26,26,46,0)');
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
 }

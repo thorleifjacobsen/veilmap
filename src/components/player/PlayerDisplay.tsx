@@ -289,7 +289,7 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           break;
         }
         case 'fog:reset': {
-          if (fogCtx) { fogCtx.fillStyle = '#080710'; fogCtx.fillRect(0, 0, MAP_W, MAP_H); }
+          if (fogCtx) { fogCtx.fillStyle = '#1a1a2e'; fogCtx.fillRect(0, 0, MAP_W, MAP_H); }
           break;
         }
         case 'box:reveal': {

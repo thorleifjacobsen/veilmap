@@ -739,7 +739,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     const fogCanvas = fogCanvasRef.current;
     if (!fogCanvas) return;
     const ctx = fogCanvas.getContext('2d')!;
-    ctx.fillStyle = '#080710';
+    ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, MAP_W, MAP_H);
     const updatedBoxes = boxesRef.current.map((b) => ({ ...b, revealed: false }));
     boxesRef.current = updatedBoxes;

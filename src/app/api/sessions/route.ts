@@ -66,6 +66,6 @@ export async function POST(req: NextRequest) {
     gm_fog_opacity: s.gm_fog_opacity,
     grid_size: s.grid_size,
     boxes: [],
-    tokens: [],
+    objects: [],
   }, { status: 201 });
 }
