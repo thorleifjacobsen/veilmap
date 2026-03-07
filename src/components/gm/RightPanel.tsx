@@ -154,22 +154,23 @@ export default function RightPanel({
             >
               {objects.length}
             </span>
+            <span
+              className="cursor-pointer text-[.58rem]"
+              style={{ color: '#c8963e' }}
+              onClick={() => objectInputRef.current?.click()}
+              title="Upload file directly"
+            >
+              📤
+            </span>
             {onLibraryOpen && (
               <span
                 className="cursor-pointer text-[.58rem]"
                 style={{ color: '#c8963e' }}
                 onClick={onLibraryOpen}
               >
-                📚
+                + Add
               </span>
             )}
-            <span
-              className="cursor-pointer text-[.58rem]"
-              style={{ color: '#c8963e' }}
-              onClick={() => objectInputRef.current?.click()}
-            >
-              + Add
-            </span>
           </span>
         </PanelTitle>
         <input

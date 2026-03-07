@@ -24,6 +24,8 @@ import {
   zoomAt,
   fitToContainer,
   applyViewport,
+  clampViewport,
+  clampToMap,
   type Viewport,
 } from '@/lib/viewport';
 import Toolbar from './Toolbar';
@@ -47,7 +49,7 @@ const MAX_UNDO = 20;
 const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a polygon
 const MIN_OBJECT_SIZE = 20; // px — minimum object width/height when resizing
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
-  box: 'Click to place polygon vertices, click near first to close',
+  box: 'Click to place polygon vertices (Shift=snap), click near first to close',
   select: 'Click a box to select/edit',
   measure: 'Drag to measure distance in feet & squares',
   ping: 'Click to ping a location on player display',
@@ -119,6 +121,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [gridMenuOpen, setGridMenuOpen] = useState<{ x: number; y: number } | null>(null);
   const [drawGridMode, setDrawGridMode] = useState(false);
+  const [canvasCursor, setCanvasCursor] = useState<string>('crosshair');
 
   // Mutable refs for interaction state
   const vpRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
@@ -128,6 +131,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const panOriginRef = useRef({ x: 0, y: 0 });
   const spaceHeldRef = useRef(false);
   const ctrlHeldRef = useRef(false);
+  const shiftHeldRef = useRef(false);
   const paintingRef = useRef(false);
   const paintUndoPushedRef = useRef(false);
   const drawStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -420,7 +424,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.save();
       applyViewport(ctx, vp);
       const gs = gridSizeRef.current;
-      const useSnap = ctrlHeldRef.current;
+      const useSnap = shiftHeldRef.current;
       const bx = Math.min(ds.x, mp.mx);
       const by = Math.min(ds.y, mp.my);
       const bw = Math.abs(mp.mx - ds.x);
@@ -451,7 +455,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     if (toolRef.current === 'box' && pts.length > 0) {
       const mp = mousePosRef.current;
       const gs = gridSizeRef.current;
-      const useSnap = ctrlHeldRef.current;
+      const useSnap = shiftHeldRef.current;
       const cursorX = useSnap ? snap(mp.mx, gs) : mp.mx;
       const cursorY = useSnap ? snap(mp.my, gs) : mp.my;
       ctx.save();
@@ -819,7 +823,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const finalizeBox = useCallback(
     (a: { x: number; y: number }, b: { x: number; y: number }) => {
       const gs = gridSizeRef.current;
-      const useSnap = ctrlHeldRef.current;
+      const useSnap = shiftHeldRef.current;
       const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
       const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
       if (w < MIN_OBJECT_SIZE || h < MIN_OBJECT_SIZE) {
@@ -987,21 +991,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   // Redraw map when grid toggles or gridSize changes
   useEffect(() => { drawMap(); }, [showGrid, gridSize, drawMap]);
 
-  // Persist showGrid and broadcast to player when it changes
+  // Persist showGrid/gridSize and broadcast to player when they change
   useEffect(() => {
     fetch(`/api/sessions/${slug}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ show_grid: showGrid }),
+      body: JSON.stringify({ show_grid: showGrid, grid_size: gridSize }),
     }).catch(() => {});
     // Broadcast grid state to players
     fetch(`/api/sessions/${slug}/fog`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grid: { show: showGrid, size: gridSizeRef.current } }),
+      body: JSON.stringify({ grid: { show: showGrid, size: gridSize } }),
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGrid, slug]);
+  }, [showGrid, gridSize, slug]);
 
   // ── Keyboard ──
 
@@ -1011,8 +1015,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       if (e.code === 'Space' && !e.repeat && tag !== 'INPUT' && tag !== 'TEXTAREA') {
         e.preventDefault();
         spaceHeldRef.current = true;
+        setCanvasCursor('grab');
       }
       if (e.ctrlKey || e.metaKey) ctrlHeldRef.current = true;
+      if (e.shiftKey) shiftHeldRef.current = true;
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
         e.preventDefault();
         undo();
@@ -1069,8 +1075,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') spaceHeldRef.current = false;
+      if (e.code === 'Space') {
+        spaceHeldRef.current = false;
+        setCanvasCursor('crosshair');
+      }
       if (!e.ctrlKey && !e.metaKey) ctrlHeldRef.current = false;
+      if (!e.shiftKey) shiftHeldRef.current = false;
     };
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
@@ -1095,6 +1105,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         panningRef.current = true;
         panStartRef.current = { x: e.clientX, y: e.clientY };
         panOriginRef.current = { x: vpRef.current.x, y: vpRef.current.y };
+        setCanvasCursor('grabbing');
         return;
       }
       if (e.button === 2) return;
@@ -1183,7 +1194,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
       if (toolRef.current === 'box') {
         const gs = gridSizeRef.current;
-        const useSnap = ctrlHeldRef.current;
+        const useSnap = shiftHeldRef.current;
         const sx2 = useSnap ? snap(mp.x, gs) : mp.x;
         const sy2 = useSnap ? snap(mp.y, gs) : mp.y;
         const polyPts = polyPointsRef.current;
@@ -1236,11 +1247,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       mousePosRef.current = { x: sx, y: sy, mx: mp.x, my: mp.y };
 
       if (panningRef.current) {
-        vpRef.current = {
+        const wrap = wrapRef.current;
+        const newVp = {
           ...vpRef.current,
           x: panOriginRef.current.x + (e.clientX - panStartRef.current.x),
           y: panOriginRef.current.y + (e.clientY - panStartRef.current.y),
         };
+        vpRef.current = wrap
+          ? clampViewport(newVp, MAP_W, MAP_H, wrap.offsetWidth, wrap.offsetHeight)
+          : newVp;
         redrawAll();
         return;
       }
@@ -1258,6 +1273,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             newX = snapCenter(objCenterX, gs) - obj.w / 2;
             newY = snapCenter(objCenterY, gs) - obj.h / 2;
           }
+          // Clamp object position to canvas bounds
+          newX = clampToMap(newX, obj.w, MAP_W);
+          newY = clampToMap(newY, obj.h, MAP_H);
           const updated = objectsRef.current.map(o =>
             o.id === drag.objId ? { ...o, x: newX, y: newY } : o
           );
@@ -1331,8 +1349,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       if (toolRef.current === 'camera' && cameraModeRef.current !== 'idle') {
         const cam = cameraRef.current;
         if (cameraModeRef.current === 'dragging' && cam) {
-          cam.x = mp.x - cameraGrabOffsetRef.current.x;
-          cam.y = mp.y - cameraGrabOffsetRef.current.y;
+          cam.x = clampToMap(mp.x - cameraGrabOffsetRef.current.x, cam.w, MAP_W);
+          cam.y = clampToMap(mp.y - cameraGrabOffsetRef.current.y, cam.h, MAP_H);
         } else if (cameraModeRef.current.startsWith('resizing') && cam) {
           const mode = cameraModeRef.current;
           if (mode === 'resizing-tl') {
@@ -1383,6 +1401,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     (e: ReactMouseEvent) => {
       if (panningRef.current) {
         panningRef.current = false;
+        setCanvasCursor(spaceHeldRef.current ? 'grab' : 'crosshair');
         return;
       }
       if (objectDragRef.current) {
@@ -1415,6 +1434,17 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           setGridSize(newSize);
           gridSizeRef.current = newSize;
           showNotif(`Grid size set to ${newSize}px`);
+          // Persist grid_size to DB and broadcast to players
+          fetch(`/api/sessions/${slug}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ grid_size: newSize }),
+          }).catch(() => {});
+          fetch(`/api/sessions/${slug}/fog`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ grid: { show: showGridRef.current, size: newSize } }),
+          }).catch(() => {});
         }
         gridDrawStartRef.current = null;
         setDrawGridMode(false);
@@ -1659,6 +1689,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const res = await fetch('/api/uploads', { method: 'POST', body: formData });
         if (!res.ok) throw new Error('Upload failed');
         const { url } = await res.json();
+        const name = file.name.replace(/\.[^.]+$/, '');
+        // Auto-add to library for future use
+        fetch('/api/library', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, url, category: 'object' }),
+        }).catch(() => {});
         const img = new Image();
         img.onload = () => {
           const id = uuidv4();
@@ -1915,7 +1952,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         <div
           ref={wrapRef}
           className="relative flex-1 overflow-hidden"
-          style={{ background: '#040308', cursor: panningRef.current ? 'grabbing' : spaceHeldRef.current ? 'grab' : 'crosshair' }}
+          style={{ background: '#040308', cursor: canvasCursor }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
         >
@@ -2126,31 +2163,69 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         <div className="fixed inset-0 z-[800] flex items-center justify-center" onClick={() => setShowLibrary(false)}>
           <div
             className="rounded-lg border p-5 shadow-2xl"
-            style={{ background: '#100f18', borderColor: 'rgba(200,150,62,.3)', minWidth: 340, maxWidth: 520, maxHeight: '80vh' }}
+            style={{ background: '#100f18', borderColor: 'rgba(200,150,62,.3)', minWidth: 400, maxWidth: 600, maxHeight: '80vh' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
               <div className="text-[.7rem] font-semibold tracking-[.1em]" style={{ fontFamily: "'Cinzel',serif", color: '#c8963e' }}>
                 ASSET LIBRARY
               </div>
-              <button
-                className="cursor-pointer rounded border px-2 py-0.5 text-[.6rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
-                style={{ fontFamily: "'Cinzel',serif", borderColor: 'rgba(200,150,62,.2)', color: '#c8963e' }}
-                onClick={() => setShowLibrary(false)}
-              >
-                Close
-              </button>
+              <div className="flex gap-2">
+                <label
+                  className="cursor-pointer rounded border px-2 py-0.5 text-[.6rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
+                  style={{ fontFamily: "'Cinzel',serif", borderColor: 'rgba(200,150,62,.2)', color: '#c8963e' }}
+                >
+                  📤 Upload
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        const res = await fetch('/api/uploads', { method: 'POST', body: formData });
+                        if (!res.ok) throw new Error('Upload failed');
+                        const { url } = await res.json();
+                        const name = file.name.replace(/\.[^.]+$/, '');
+                        // Add to library
+                        await fetch('/api/library', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ name, url, category: 'object' }),
+                        });
+                        // Refresh library assets
+                        const libRes = await fetch('/api/library');
+                        if (libRes.ok) setLibraryAssets(await libRes.json());
+                        showNotif(`Uploaded: ${name}`);
+                      } catch {
+                        showNotif('Upload failed');
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button
+                  className="cursor-pointer rounded border px-2 py-0.5 text-[.6rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
+                  style={{ fontFamily: "'Cinzel',serif", borderColor: 'rgba(200,150,62,.2)', color: '#c8963e' }}
+                  onClick={() => setShowLibrary(false)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
             {libraryAssets.length === 0 ? (
               <div className="py-6 text-center text-[.65rem]" style={{ color: 'rgba(212,196,160,.4)' }}>
-                No assets yet. Upload files via the Objects panel.
+                No assets yet. Click Upload to add your first asset.
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-2 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+              <div className="grid grid-cols-4 gap-2 overflow-y-auto" style={{ maxHeight: '60vh' }}>
                 {libraryAssets.map((asset) => (
                   <div
                     key={asset.id}
-                    className="cursor-pointer rounded border p-1 transition-all hover:border-[#c8963e] hover:bg-[rgba(200,150,62,.05)]"
+                    className="group cursor-pointer rounded border p-1 transition-all hover:border-[#c8963e] hover:bg-[rgba(200,150,62,.05)]"
                     style={{ borderColor: 'rgba(200,150,62,.15)' }}
                     onClick={() => {
                       const img = new Image();
@@ -2199,6 +2274,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                     <div className="mt-0.5 truncate text-[.55rem]" style={{ color: 'rgba(212,196,160,.6)' }}>
                       {asset.name}
                     </div>
+                    {asset.is_global && (
+                      <div className="text-[.45rem]" style={{ color: 'rgba(212,196,160,.3)' }}>Global</div>
+                    )}
                   </div>
                 ))}
               </div>
