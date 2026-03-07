@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { subscribe, getFogState, getCameraState, setCameraState, getBlackoutState, getObjectsState } from '@/lib/sse';
+import { subscribe, getFogState, setFogState, getCameraState, setCameraState, getBlackoutState, getObjectsState } from '@/lib/sse';
 import type { SSEEvent } from '@/types';
 
 // GET /api/sessions/[slug]/events — SSE endpoint for player display
@@ -27,7 +27,7 @@ export async function GET(
     id: s.id, slug: s.slug, owner_id: s.owner_id, name: s.name,
     map_url: s.map_url, prep_mode: s.prep_mode, prep_message: s.prep_message,
     gm_fog_opacity: s.gm_fog_opacity, grid_size: s.grid_size,
-    show_grid: s.show_grid,
+    show_grid: s.show_grid, grid_color: s.grid_color, grid_opacity: s.grid_opacity,
     camera_x: s.camera_x, camera_y: s.camera_y,
     camera_w: s.camera_w, camera_h: s.camera_h,
     boxes: s.boxes.map((b) => ({
@@ -64,7 +64,12 @@ export async function GET(
   const stream = new ReadableStream({
     start(controller) {
       // Send initial full state
-      const fogPng = getFogState(slug);
+      let fogPng = getFogState(slug);
+      // Fall back to DB fog_snapshot if in-memory is null
+      if (!fogPng && s.fog_snapshot) {
+        fogPng = Buffer.from(s.fog_snapshot).toString('base64');
+        setFogState(slug, fogPng);
+      }
       const memCamera = getCameraState(slug);
       // Fall back to DB camera if in-memory is null
       const camera = memCamera ?? (s.camera_x != null && s.camera_y != null && s.camera_w != null && s.camera_h != null
@@ -79,7 +84,7 @@ export async function GET(
       // Always send DB objects as the canonical list so reconnects are consistent
       const fullState: SSEEvent = {
         type: 'state:full',
-        payload: { session: { ...sessionData, objects }, fogPng, objects, camera, blackout, grid: { show: s.show_grid, size: s.grid_size } },
+        payload: { session: { ...sessionData, objects }, fogPng, objects, camera, blackout, grid: { show: s.show_grid, size: s.grid_size, color: s.grid_color, opacity: s.grid_opacity } },
       };
       controller.enqueue(encoder.encode(`data: ${JSON.stringify(fullState)}\n\n`));
 

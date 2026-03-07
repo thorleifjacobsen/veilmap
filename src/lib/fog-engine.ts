@@ -36,8 +36,9 @@ export function revealAllFog(ctx: CanvasRenderingContext2D) {
 }
 
 export function paintReveal(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
+  const r = Math.max(radius, 0.5);
   ctx.globalCompositeOperation = 'destination-out';
-  const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
   g.addColorStop(0, 'rgba(0,0,0,1)');
   g.addColorStop(0.2, 'rgba(0,0,0,1)');
   g.addColorStop(0.4, 'rgba(0,0,0,0.95)');
@@ -46,7 +47,7 @@ export function paintReveal(ctx: CanvasRenderingContext2D, x: number, y: number,
   g.addColorStop(0.9, 'rgba(0,0,0,0.1)');
   g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
 }
 
@@ -66,7 +67,7 @@ export function animateReveal(
     const progress = Math.min(elapsed / duration, 1);
     // Ease out cubic for smoother reveal
     const ease = 1 - Math.pow(1 - progress, 3);
-    const r = radius * (0.15 + ease * 0.85);
+    const r = Math.max(radius * (0.15 + ease * 0.85), 0.5);
 
     ctx.globalCompositeOperation = 'destination-out';
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
@@ -89,12 +90,13 @@ export function animateReveal(
 }
 
 export function paintHide(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
-  const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+  const r = Math.max(radius, 0.5);
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
   g.addColorStop(0, '#1a1a2e');
   g.addColorStop(0.7, '#1a1a2e');
   g.addColorStop(1, 'rgba(26,26,46,0)');
   ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
 }
 
 export function revealBox(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number; points?: { x: number; y: number }[] }) {
@@ -110,7 +112,7 @@ export function revealBox(ctx: CanvasRenderingContext2D, box: { x: number; y: nu
     ctx.fill();
   } else {
     const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
-    const r = Math.max(box.w, box.h) * 0.78;
+    const r = Math.max(Math.max(box.w, box.h) * 0.78, 0.5);
     const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
     g.addColorStop(0, 'rgba(0,0,0,1)');
     g.addColorStop(0.8, 'rgba(0,0,0,1)');

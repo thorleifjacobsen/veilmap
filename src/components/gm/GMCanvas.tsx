@@ -18,6 +18,7 @@ import {
   revealAllFog,
   revealBox as revealBoxFog,
   fogToBase64,
+  loadFogFromBase64,
 } from '@/lib/fog-engine';
 import {
   screenToMap,
@@ -98,6 +99,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [showGrid, setShowGrid] = useState(session.show_grid ?? false);
   const [gmFogOpacity, setGmFogOpacity] = useState(session.gm_fog_opacity);
   const [gridSize, setGridSize] = useState(session.grid_size || 32);
+  const [gridColor, setGridColor] = useState(session.grid_color || '#c8963e');
+  const [gridOpacity, setGridOpacity] = useState(session.grid_opacity ?? 0.25);
   const [prepMessage, setPrepMessage] = useState(session.prep_message || 'Preparing next scene…');
   const [sessionName, setSessionName] = useState(session.name);
   const [boxes, setBoxes] = useState<Box[]>(session.boxes || []);
@@ -151,6 +154,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const objectsRef = useRef<MapObject[]>(session.objects || []);
   const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const gridSizeRef = useRef(session.grid_size || 32);
+  const gridColorRef = useRef(session.grid_color || '#c8963e');
+  const gridOpacityRef = useRef(session.grid_opacity ?? 0.25);
   const gmFogOpacityRef = useRef(session.gm_fog_opacity);
   const brushRadiusRef = useRef(36);
   const showGridRef = useRef(session.show_grid ?? false);
@@ -254,7 +259,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const apiBoxDelete = useCallback(
     (id: string) => {
-      fetch(`/api/sessions/${slug}/boxes/${id}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/sessions/${slug}/boxes`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ boxId: id }),
+      }).catch(() => {});
     },
     [slug],
   );
@@ -368,7 +377,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     applyViewport(ctx, vp);
 
     // Grid overlay (above fog, above objects)
-    if (showGridRef.current) drawGridLines(ctx, gridSizeRef.current, vp.scale);
+    if (showGridRef.current) drawGridLines(ctx, gridSizeRef.current, vp.scale, gridColorRef.current, gridOpacityRef.current);
 
     const now = Date.now();
 
@@ -921,6 +930,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => {
     fogCanvasRef.current = createFogCanvas();
 
+    // Load fog from DB if available
+    fetch(`/api/sessions/${slug}/fog`).then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.png && fogCanvasRef.current) {
+        const ctx = fogCanvasRef.current.getContext('2d');
+        if (ctx) loadFogFromBase64(ctx, data.png).then(() => { composeFogGM(); drawMap(); });
+      }
+    }).catch(() => {});
+
     // Load existing fog if available
     if (session.map_url) {
       const img = new Image();
@@ -988,24 +1005,24 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { redrawBoxes(); }, [boxes, selectedBoxId, redrawBoxes]);
   // Redraw fog when opacity changes
   useEffect(() => { composeFogGM(); }, [gmFogOpacity, composeFogGM]);
-  // Redraw map when grid toggles or gridSize changes
-  useEffect(() => { drawMap(); }, [showGrid, gridSize, drawMap]);
+  // Redraw map when grid toggles or gridSize/color/opacity changes
+  useEffect(() => { drawMap(); }, [showGrid, gridSize, gridColor, gridOpacity, drawMap]);
 
-  // Persist showGrid/gridSize and broadcast to player when they change
+  // Persist showGrid/gridSize/gridColor/gridOpacity and broadcast to player when they change
   useEffect(() => {
     fetch(`/api/sessions/${slug}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ show_grid: showGrid, grid_size: gridSize }),
+      body: JSON.stringify({ show_grid: showGrid, grid_size: gridSize, grid_color: gridColor, grid_opacity: gridOpacity }),
     }).catch(() => {});
     // Broadcast grid state to players
     fetch(`/api/sessions/${slug}/fog`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grid: { show: showGrid, size: gridSize } }),
+      body: JSON.stringify({ grid: { show: showGrid, size: gridSize, color: gridColor, opacity: gridOpacity } }),
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGrid, gridSize, slug]);
+  }, [showGrid, gridSize, gridColor, gridOpacity, slug]);
 
   // ── Keyboard ──
 
@@ -1443,7 +1460,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           fetch(`/api/sessions/${slug}/fog`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ grid: { show: showGridRef.current, size: newSize } }),
+            body: JSON.stringify({ grid: { show: showGridRef.current, size: newSize, color: gridColorRef.current, opacity: gridOpacityRef.current } }),
           }).catch(() => {});
         }
         gridDrawStartRef.current = null;
@@ -2066,6 +2083,32 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           >
             📏 Draw Grid Size
           </div>
+          <div className="border-t border-[rgba(200,150,62,.15)] my-1" />
+          <div className="px-3 py-1.5 text-[.6rem]" style={{ fontFamily: "'Cinzel',serif", color: '#8a7a5a' }}>Grid Color</div>
+          <div className="flex items-center gap-2 px-3 pb-1" onClick={e => e.stopPropagation()}>
+            {['#c8963e', '#ffffff', '#888888', '#4a90d9', '#d94a4a', '#4ad97a'].map(c => (
+              <div
+                key={c}
+                className="w-5 h-5 rounded cursor-pointer border"
+                style={{ background: c, borderColor: gridColor === c ? '#fff' : 'rgba(200,150,62,.3)' }}
+                onClick={() => { setGridColor(c); gridColorRef.current = c; }}
+              />
+            ))}
+          </div>
+          <div className="px-3 py-1.5 text-[.6rem]" style={{ fontFamily: "'Cinzel',serif", color: '#8a7a5a' }}>Grid Opacity</div>
+          <div className="flex items-center gap-2 px-3 pb-1.5" onClick={e => e.stopPropagation()}>
+            <input
+              type="range"
+              min="0.05"
+              max="0.8"
+              step="0.05"
+              value={gridOpacity}
+              onChange={e => { const v = parseFloat(e.target.value); setGridOpacity(v); gridOpacityRef.current = v; }}
+              className="w-full accent-[#c8963e]"
+              style={{ height: 4 }}
+            />
+            <span className="text-[.6rem] text-[#8a7a5a] w-8 text-right">{Math.round(gridOpacity * 100)}%</span>
+          </div>
         </div>
       )}
 
@@ -2306,8 +2349,12 @@ function HeaderBtn({ children, onClick }: { children: React.ReactNode; onClick: 
   );
 }
 
-function drawGridLines(c: CanvasRenderingContext2D, gridSize: number, scale: number) {
-  c.strokeStyle = 'rgba(200,150,62,.07)';
+function drawGridLines(c: CanvasRenderingContext2D, gridSize: number, scale: number, color: string, opacity: number) {
+  // Parse hex color to RGB and apply opacity
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  c.strokeStyle = `rgba(${r},${g},${b},${opacity})`;
   c.lineWidth = 1 / scale;
   for (let x = 0; x <= MAP_W; x += gridSize) {
     c.beginPath();

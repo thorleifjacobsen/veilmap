@@ -32,6 +32,8 @@ export async function GET(
     gm_fog_opacity: s.gm_fog_opacity,
     grid_size: s.grid_size,
     show_grid: s.show_grid,
+    grid_color: s.grid_color,
+    grid_opacity: s.grid_opacity,
     camera_x: s.camera_x,
     camera_y: s.camera_y,
     camera_w: s.camera_w,
@@ -92,6 +94,8 @@ export async function PATCH(
   if (body.gm_fog_opacity !== undefined) updates.gm_fog_opacity = body.gm_fog_opacity;
   if (body.grid_size !== undefined) updates.grid_size = body.grid_size;
   if (body.show_grid !== undefined) updates.show_grid = body.show_grid;
+  if (body.grid_color !== undefined) updates.grid_color = body.grid_color;
+  if (body.grid_opacity !== undefined) updates.grid_opacity = body.grid_opacity;
   if (body.camera_x !== undefined) updates.camera_x = body.camera_x;
   if (body.camera_y !== undefined) updates.camera_y = body.camera_y;
   if (body.camera_w !== undefined) updates.camera_w = body.camera_w;

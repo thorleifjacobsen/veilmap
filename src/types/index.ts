@@ -48,6 +48,8 @@ export interface Session {
   gm_fog_opacity: number;
   grid_size: number;
   show_grid: boolean;
+  grid_color: string;
+  grid_opacity: number;
   camera_x: number | null;
   camera_y: number | null;
   camera_w: number | null;
@@ -134,7 +136,7 @@ export interface FullStatePayload {
   fogPng: string | null;
   objects: MapObject[];
   camera: CameraViewport | null;
-  grid?: { show: boolean; size: number };
+  grid?: { show: boolean; size: number; color: string; opacity: number };
 }
 
 // Session export format for free users

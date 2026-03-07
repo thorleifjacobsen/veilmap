@@ -18,7 +18,7 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const objectsRef = useRef<MapObject[]>([]);
   const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const pingsRef = useRef<Array<{ x: number; y: number; born: number }>>([]);
-  const gridRef = useRef<{ show: boolean; size: number }>({ show: false, size: 32 });
+  const gridRef = useRef<{ show: boolean; size: number; color: string; opacity: number }>({ show: false, size: 32, color: '#c8963e', opacity: 0.25 });
   const [connected, setConnected] = useState(false);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
@@ -146,7 +146,13 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     // Draw grid above fog so it's always visible
     if (gridRef.current.show && gridRef.current.size > 0) {
       const gs = gridRef.current.size;
-      ctx.strokeStyle = 'rgba(200,150,62,.12)';
+      const gc = gridRef.current.color || '#c8963e';
+      const go = gridRef.current.opacity ?? 0.25;
+      // Parse hex color to RGB
+      const rr = parseInt(gc.slice(1, 3), 16);
+      const gg = parseInt(gc.slice(3, 5), 16);
+      const bb = parseInt(gc.slice(5, 7), 16);
+      ctx.strokeStyle = `rgba(${rr},${gg},${bb},${go})`;
       ctx.lineWidth = 1;
       for (let x = 0; x <= MAP_W; x += gs) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, MAP_H); ctx.stroke();
@@ -263,9 +269,9 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           }
           // Set grid state
           if (p.grid) {
-            gridRef.current = p.grid;
+            gridRef.current = { show: p.grid.show, size: p.grid.size, color: p.grid.color || '#c8963e', opacity: p.grid.opacity ?? 0.25 };
           } else if (p.session.show_grid !== undefined) {
-            gridRef.current = { show: p.session.show_grid, size: p.session.grid_size };
+            gridRef.current = { show: p.session.show_grid, size: p.session.grid_size, color: p.session.grid_color || '#c8963e', opacity: p.session.grid_opacity ?? 0.25 };
           }
           // Set blackout
           const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
@@ -355,8 +361,8 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           break;
         }
         case 'grid:update': {
-          const p = event.payload as { show: boolean; size: number };
-          gridRef.current = p;
+          const p = event.payload as { show: boolean; size: number; color?: string; opacity?: number };
+          gridRef.current = { show: p.show, size: p.size, color: p.color || gridRef.current.color, opacity: p.opacity ?? gridRef.current.opacity };
           break;
         }
         case 'objects:update': {

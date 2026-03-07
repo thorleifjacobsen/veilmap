@@ -39,6 +39,8 @@ model Session {
   gm_fog_opacity Float    @default(0.5) @db.Real
   grid_size      Int      @default(32)
   show_grid      Boolean  @default(false)
+  grid_color     String   @default("#c8963e")
+  grid_opacity   Float    @default(0.25) @db.Real
   camera_x       Float?   @db.Real
   camera_y       Float?   @db.Real
   camera_w       Float?   @db.Real
