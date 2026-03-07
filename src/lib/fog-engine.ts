@@ -43,7 +43,7 @@ export function animateReveal(
     const elapsed = now - start;
     const progress = Math.min(elapsed / duration, 1);
 
-    for (let i = 0; i <= steps; i++) {
+    for (let i = 0; i < steps; i++) {
       const t = i / steps;
       if (t > progress) break;
       const r = radius * (0.3 + t * 0.7);

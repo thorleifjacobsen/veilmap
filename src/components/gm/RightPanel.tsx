@@ -362,6 +362,7 @@ function MiniBtn({ children, title, onClick }: { children: React.ReactNode; titl
       className="flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded text-[.5rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
       style={{ color: '#d4c4a0' }}
       title={title}
+      aria-label={title}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
       {children}
