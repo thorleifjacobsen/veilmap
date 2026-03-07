@@ -1,7 +1,7 @@
 'use client';
 
-import { useRef, useCallback } from 'react';
-import type { Box, Token, SessionExport } from '@/types';
+import { useRef, useCallback, useState } from 'react';
+import type { Box, Token, MapObject, SessionExport } from '@/types';
 
 const TYPE_COLORS: Record<string, string> = {
   autoReveal: '#c8963e',
@@ -27,6 +27,7 @@ const TOKEN_PALETTE: { emoji: string; color: string }[] = [
 interface RightPanelProps {
   boxes: Box[];
   tokens: Token[];
+  objects: MapObject[];
   selectedBoxId: string | null;
   onBoxClick: (box: Box) => void;
   onRevealAll: () => void;
@@ -36,10 +37,15 @@ interface RightPanelProps {
   onMapUpload: (file: File) => void;
   onExport: () => void;
   onImport: (data: SessionExport) => void;
+  onObjectAdd: (file: File) => void;
+  onObjectUpdate: (id: string, updates: Partial<MapObject>) => void;
+  onObjectDelete: (id: string) => void;
+  onObjectReorder: (id: string, direction: 'up' | 'down') => void;
 }
 
 export default function RightPanel({
   boxes,
+  objects,
   selectedBoxId,
   onBoxClick,
   onRevealAll,
@@ -49,9 +55,16 @@ export default function RightPanel({
   onMapUpload,
   onExport,
   onImport,
+  onObjectAdd,
+  onObjectUpdate,
+  onObjectDelete,
+  onObjectReorder,
 }: RightPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const objectInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [editNameValue, setEditNameValue] = useState('');
 
   const handleMapChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -61,13 +74,27 @@ export default function RightPanel({
     [onMapUpload],
   );
 
-  const handleDrop = useCallback(
+  const handleObjectFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files) return;
+      for (let i = 0; i < files.length; i++) {
+        onObjectAdd(files[i]);
+      }
+      e.target.value = '';
+    },
+    [onObjectAdd],
+  );
+
+  const handleObjectDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      const f = e.dataTransfer.files[0];
-      if (f?.type.startsWith('image/')) onMapUpload(f);
+      const files = e.dataTransfer.files;
+      for (let i = 0; i < files.length; i++) {
+        if (files[i].type.startsWith('image/')) onObjectAdd(files[i]);
+      }
     },
-    [onMapUpload],
+    [onObjectAdd],
   );
 
   const handleImportFile = useCallback(
@@ -88,6 +115,21 @@ export default function RightPanel({
     [onImport],
   );
 
+  const startEditName = (obj: MapObject) => {
+    setEditingNameId(obj.id);
+    setEditNameValue(obj.name);
+  };
+
+  const commitEditName = () => {
+    if (editingNameId && editNameValue.trim()) {
+      onObjectUpdate(editingNameId, { name: editNameValue.trim() });
+    }
+    setEditingNameId(null);
+  };
+
+  // Sort objects by zIndex descending (highest on top)
+  const sortedObjects = [...objects].sort((a, b) => b.zIndex - a.zIndex);
+
   return (
     <div
       className="flex w-[190px] flex-shrink-0 flex-col overflow-hidden"
@@ -96,18 +138,34 @@ export default function RightPanel({
         borderLeft: '1px solid rgba(200,150,62,.2)',
       }}
     >
-      {/* Map upload section */}
+      {/* Objects (layer panel) section */}
       <PanelSection>
         <PanelTitle>
-          Map{' '}
-          <span
-            className="ml-auto cursor-pointer text-[.5rem]"
-            style={{ color: '#c8963e' }}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            + Upload
+          Objects{' '}
+          <span className="ml-auto flex items-center gap-1">
+            <span
+              className="text-[.5rem]"
+              style={{ color: 'rgba(212,196,160,.4)' }}
+            >
+              {objects.length}
+            </span>
+            <span
+              className="cursor-pointer text-[.5rem]"
+              style={{ color: '#c8963e' }}
+              onClick={() => objectInputRef.current?.click()}
+            >
+              + Add
+            </span>
           </span>
         </PanelTitle>
+        <input
+          ref={objectInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          className="hidden"
+          onChange={handleObjectFileChange}
+        />
         <input
           ref={fileInputRef}
           type="file"
@@ -115,21 +173,96 @@ export default function RightPanel({
           className="hidden"
           onChange={handleMapChange}
         />
-        <div
-          className="cursor-pointer rounded border border-dashed p-2.5 text-center transition-all hover:border-[#c8963e] hover:bg-[rgba(200,150,62,.04)]"
-          style={{ borderColor: 'rgba(200,150,62,.2)' }}
-          onClick={() => fileInputRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-        >
-          <div className="mb-0.5 text-base">🗺️</div>
+        {sortedObjects.length === 0 ? (
           <div
-            className="text-[.6rem] tracking-[.04em]"
-            style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
+            className="cursor-pointer rounded border border-dashed p-2 text-center transition-all hover:border-[#c8963e] hover:bg-[rgba(200,150,62,.04)]"
+            style={{ borderColor: 'rgba(200,150,62,.2)' }}
+            onClick={() => objectInputRef.current?.click()}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleObjectDrop}
           >
-            CLICK OR DROP MAP
+            <div className="mb-0.5 text-base">🖼️</div>
+            <div
+              className="text-[.55rem] tracking-[.04em]"
+              style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
+            >
+              DROP IMAGES / GIFS
+            </div>
           </div>
-        </div>
+        ) : (
+          <div
+            className="max-h-[180px] overflow-y-auto"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleObjectDrop}
+          >
+            {sortedObjects.map((obj) => (
+              <div
+                key={obj.id}
+                className="mb-0.5 flex items-center gap-1 rounded border px-1 py-0.5 text-[.65rem] transition-all hover:bg-[rgba(200,150,62,.05)]"
+                style={{ borderColor: 'transparent', opacity: obj.visible ? 1 : 0.4 }}
+              >
+                {/* Thumbnail */}
+                <div
+                  className="h-[22px] w-[22px] flex-shrink-0 overflow-hidden rounded"
+                  style={{ background: 'rgba(0,0,0,.4)', border: '1px solid rgba(200,150,62,.15)' }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={obj.src} alt={obj.name} className="h-full w-full object-cover" />
+                </div>
+                {/* Name */}
+                {editingNameId === obj.id ? (
+                  <input
+                    className="min-w-0 flex-1 bg-transparent text-[.6rem] outline-none"
+                    style={{ color: '#d4c4a0', borderBottom: '1px solid #c8963e' }}
+                    value={editNameValue}
+                    onChange={(e) => setEditNameValue(e.target.value)}
+                    onBlur={commitEditName}
+                    onKeyDown={(e) => { if (e.key === 'Enter') commitEditName(); }}
+                    autoFocus
+                  />
+                ) : (
+                  <span
+                    className="min-w-0 flex-1 cursor-text overflow-hidden text-ellipsis whitespace-nowrap text-[.6rem]"
+                    onDoubleClick={() => startEditName(obj)}
+                  >
+                    {obj.name}
+                  </span>
+                )}
+                {/* Controls */}
+                <div className="flex flex-shrink-0 items-center gap-px">
+                  <MiniBtn
+                    title={obj.visible ? 'Hide' : 'Show'}
+                    onClick={() => onObjectUpdate(obj.id, { visible: !obj.visible })}
+                  >
+                    {obj.visible ? '👁' : '👁‍🗨'}
+                  </MiniBtn>
+                  <MiniBtn
+                    title={obj.locked ? 'Unlock' : 'Lock'}
+                    onClick={() => onObjectUpdate(obj.id, { locked: !obj.locked })}
+                  >
+                    {obj.locked ? '🔒' : '🔓'}
+                  </MiniBtn>
+                  <MiniBtn title="Move up" onClick={() => onObjectReorder(obj.id, 'up')}>
+                    ▲
+                  </MiniBtn>
+                  <MiniBtn title="Move down" onClick={() => onObjectReorder(obj.id, 'down')}>
+                    ▼
+                  </MiniBtn>
+                  <MiniBtn title="Delete" onClick={() => onObjectDelete(obj.id)}>
+                    ✕
+                  </MiniBtn>
+                </div>
+              </div>
+            ))}
+            <div
+              className="mt-1 cursor-pointer rounded border border-dashed p-1 text-center text-[.5rem] transition-all hover:border-[#c8963e]"
+              style={{ borderColor: 'rgba(200,150,62,.15)', color: 'rgba(212,196,160,.3)' }}
+              onClick={() => objectInputRef.current?.click()}
+            >
+              + Add more
+            </div>
+          </div>
+        )}
       </PanelSection>
 
       {/* Meta Boxes section */}
@@ -220,6 +353,19 @@ export default function RightPanel({
         </SmallBtn>
       </PanelSection>
     </div>
+  );
+}
+
+function MiniBtn({ children, title, onClick }: { children: React.ReactNode; title: string; onClick: () => void }) {
+  return (
+    <button
+      className="flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded text-[.5rem] transition-all hover:bg-[rgba(200,150,62,.15)]"
+      style={{ color: '#d4c4a0' }}
+      title={title}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+    >
+      {children}
+    </button>
   );
 }
 
