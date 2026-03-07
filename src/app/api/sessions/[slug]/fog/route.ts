@@ -12,13 +12,20 @@ export async function PUT(
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { slug } = await params;
 
-  const sessionRow = await db`
-    SELECT s.id, s.owner_id, u.is_pro
-    FROM sessions s JOIN users u ON u.id = s.owner_id
-    WHERE s.slug = ${slug}
-  `;
-  if (!sessionRow.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (sessionRow[0].owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const sessionRow = await db.session.findUnique({
+    where: { slug },
+    select: {
+      id: true,
+      owner_id: true,
+      owner: {
+        select: {
+          is_pro: true,
+        },
+      },
+    },
+  });
+  if (!sessionRow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (sessionRow.owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   if (!body.png) return NextResponse.json({ error: 'Missing png' }, { status: 400 });
@@ -27,9 +34,15 @@ export async function PUT(
   setFogState(slug, body.png);
 
   // Only persist to DB for pro users
-  if (sessionRow[0].is_pro) {
+  if (sessionRow.owner.is_pro) {
     const fogBuffer = Buffer.from(body.png, 'base64');
-    await db`UPDATE sessions SET fog_snapshot = ${fogBuffer}, updated_at = NOW() WHERE slug = ${slug}`;
+    await db.session.update({
+      where: { slug },
+      data: {
+        fog_snapshot: fogBuffer,
+        updated_at: new Date(),
+      },
+    });
   }
 
   // Broadcast to all connected player displays
@@ -47,9 +60,9 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { slug } = await params;
 
-  const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
-  if (!sessionRow.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (sessionRow[0].owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const sessionRow = await db.session.findUnique({ where: { slug }, select: { id: true, owner_id: true } });
+  if (!sessionRow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (sessionRow.owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
 

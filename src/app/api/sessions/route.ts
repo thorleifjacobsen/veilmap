@@ -10,12 +10,19 @@ export async function GET() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const sessions = await db`
-    SELECT id, slug, name, map_url, prep_mode, created_at, updated_at
-    FROM sessions
-    WHERE owner_id = ${session.user.id}
-    ORDER BY updated_at DESC
-  `;
+  const sessions = await db.session.findMany({
+    where: { owner_id: session.user.id },
+    select: {
+      id: true,
+      slug: true,
+      name: true,
+      map_url: true,
+      prep_mode: true,
+      created_at: true,
+      updated_at: true,
+    },
+    orderBy: { updated_at: 'desc' },
+  });
 
   return NextResponse.json(sessions);
 }
@@ -34,19 +41,20 @@ export async function POST(req: NextRequest) {
   let slug = generateSlug();
   let attempts = 0;
   while (attempts < 10) {
-    const existing = await db`SELECT id FROM sessions WHERE slug = ${slug}`;
-    if (!existing.length) break;
+    const existing = await db.session.findUnique({ where: { slug }, select: { id: true } });
+    if (!existing) break;
     slug = generateSlug();
     attempts++;
   }
 
-  const result = await db`
-    INSERT INTO sessions (slug, owner_id, name)
-    VALUES (${slug}, ${session.user.id}, ${name})
-    RETURNING *
-  `;
+  const s = await db.session.create({
+    data: {
+      slug,
+      owner_id: session.user.id,
+      name,
+    },
+  });
 
-  const s = result[0];
   return NextResponse.json({
     id: s.id,
     slug: s.slug,

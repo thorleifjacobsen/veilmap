@@ -1,27 +1,19 @@
 // types/index.ts — All shared TypeScript types
 
-export type BoxType = 'autoReveal' | 'trigger' | 'hazard' | 'note' | 'hidden';
+import type {
+  Box as PrismaBox,
+  BoxType as PrismaBoxType,
+  Token as PrismaToken,
+} from '@prisma/client';
 
-export interface Box {
-  id: string;
-  session_id: string;
-  name: string;
-  type: BoxType;
-  x: number; y: number; w: number; h: number;
-  color: string;
-  notes: string;
-  revealed: boolean;
-  sort_order: number;
-}
+export type BoxType = PrismaBoxType;
 
-export interface Token {
-  id: string;
-  session_id: string;
-  emoji: string;
-  color: string;
-  x: number; y: number;
-  label: string;
-}
+export type Box = Pick<
+  PrismaBox,
+  'id' | 'session_id' | 'name' | 'type' | 'x' | 'y' | 'w' | 'h' | 'color' | 'notes' | 'revealed' | 'sort_order'
+>;
+
+export type Token = Pick<PrismaToken, 'id' | 'session_id' | 'emoji' | 'color' | 'x' | 'y' | 'label'>;
 
 export interface MapObject {
   id: string;

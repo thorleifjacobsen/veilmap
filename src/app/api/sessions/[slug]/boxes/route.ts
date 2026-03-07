@@ -13,23 +13,30 @@ export async function POST(
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { slug } = await params;
 
-  const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
-  if (!sessionRow.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (sessionRow[0].owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const sessionRow = await db.session.findUnique({ where: { slug }, select: { id: true, owner_id: true } });
+  if (!sessionRow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (sessionRow.owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const body = await req.json();
   const id = body.id || uuidv4();
 
-  const result = await db`
-    INSERT INTO boxes (id, session_id, name, type, x, y, w, h, color, notes, revealed, sort_order)
-    VALUES (${id}, ${sessionRow[0].id}, ${body.name || 'Room'}, ${body.type || 'autoReveal'},
-            ${body.x}, ${body.y}, ${body.w}, ${body.h},
-            ${body.color || '#c8963e'}, ${body.notes || ''},
-            ${body.revealed || false}, ${body.sort_order || 0})
-    RETURNING *
-  `;
+  const b = await db.box.create({
+    data: {
+      id,
+      session_id: sessionRow.id,
+      name: body.name || 'Room',
+      type: body.type || 'autoReveal',
+      x: body.x,
+      y: body.y,
+      w: body.w,
+      h: body.h,
+      color: body.color || '#c8963e',
+      notes: body.notes || '',
+      revealed: body.revealed || false,
+      sort_order: body.sort_order || 0,
+    },
+  });
 
-  const b = result[0];
   const box = {
     id: b.id, session_id: b.session_id, name: b.name, type: b.type,
     x: b.x, y: b.y, w: b.w, h: b.h,
@@ -49,8 +56,8 @@ export async function PATCH(
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { slug } = await params;
 
-  const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
-  if (!sessionRow.length || sessionRow[0].owner_id !== session.user.id) {
+  const sessionRow = await db.session.findUnique({ where: { slug }, select: { id: true, owner_id: true } });
+  if (!sessionRow || sessionRow.owner_id !== session.user.id) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -64,7 +71,10 @@ export async function PATCH(
   }
 
   if (Object.keys(dbUpdates).length > 0) {
-    await db`UPDATE boxes SET ${db(dbUpdates, ...Object.keys(dbUpdates))} WHERE id = ${boxId} AND session_id = ${sessionRow[0].id}`;
+    await db.box.updateMany({
+      where: { id: boxId, session_id: sessionRow.id },
+      data: dbUpdates,
+    });
   }
 
   // Broadcast reveal/hide specifically
@@ -84,15 +94,15 @@ export async function DELETE(
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { slug } = await params;
 
-  const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
-  if (!sessionRow.length || sessionRow[0].owner_id !== session.user.id) {
+  const sessionRow = await db.session.findUnique({ where: { slug }, select: { id: true, owner_id: true } });
+  if (!sessionRow || sessionRow.owner_id !== session.user.id) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const body = await req.json();
   if (!body.boxId) return NextResponse.json({ error: 'Missing boxId' }, { status: 400 });
 
-  await db`DELETE FROM boxes WHERE id = ${body.boxId} AND session_id = ${sessionRow[0].id}`;
+  await db.box.deleteMany({ where: { id: body.boxId, session_id: sessionRow.id } });
   broadcast(slug, { type: 'box:delete', payload: { boxId: body.boxId } });
   return NextResponse.json({ ok: true });
 }

@@ -1,11 +1,9 @@
-import postgres from 'postgres';
+import { PrismaClient } from '@prisma/client';
 
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://veilmap:password@localhost:5432/veilmap';
+const globalForPrisma = globalThis as unknown as { db?: PrismaClient };
 
-const db = postgres(DATABASE_URL, {
-  max: 10,
-  idle_timeout: 20,
-  connect_timeout: 10,
-});
+export const db = globalForPrisma.db ?? new PrismaClient();
 
-export { db };
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.db = db;
+}

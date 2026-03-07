@@ -11,39 +11,45 @@ export async function GET(
   const { slug } = await params;
 
   // Verify session exists
-  const sessions = await db`
-    SELECT s.*,
-      COALESCE(
-        json_agg(DISTINCT jsonb_build_object(
-          'id', b.id, 'session_id', b.session_id, 'name', b.name, 'type', b.type,
-          'x', b.x, 'y', b.y, 'w', b.w, 'h', b.h,
-          'color', b.color, 'notes', b.notes,
-          'revealed', b.revealed, 'sort_order', b.sort_order
-        )) FILTER (WHERE b.id IS NOT NULL), '[]'
-      ) as boxes,
-      COALESCE(
-        json_agg(DISTINCT jsonb_build_object(
-          'id', t.id, 'session_id', t.session_id, 'emoji', t.emoji,
-          'color', t.color, 'x', t.x, 'y', t.y, 'label', t.label
-        )) FILTER (WHERE t.id IS NOT NULL), '[]'
-      ) as tokens
-    FROM sessions s
-    LEFT JOIN boxes b ON b.session_id = s.id
-    LEFT JOIN tokens t ON t.session_id = s.id
-    WHERE s.slug = ${slug}
-    GROUP BY s.id
-  `;
+  const s = await db.session.findUnique({
+    where: { slug },
+    include: {
+      boxes: true,
+      tokens: true,
+    },
+  });
 
-  if (!sessions.length) {
+  if (!s) {
     return new Response('Session not found', { status: 404 });
   }
 
-  const s = sessions[0];
   const sessionData = {
     id: s.id, slug: s.slug, owner_id: s.owner_id, name: s.name,
     map_url: s.map_url, prep_mode: s.prep_mode, prep_message: s.prep_message,
     gm_fog_opacity: s.gm_fog_opacity, grid_size: s.grid_size,
-    boxes: s.boxes || [], tokens: s.tokens || [],
+    boxes: s.boxes.map((b) => ({
+      id: b.id,
+      session_id: b.session_id,
+      name: b.name,
+      type: b.type,
+      x: b.x,
+      y: b.y,
+      w: b.w,
+      h: b.h,
+      color: b.color,
+      notes: b.notes,
+      revealed: b.revealed,
+      sort_order: b.sort_order,
+    })),
+    tokens: s.tokens.map((t) => ({
+      id: t.id,
+      session_id: t.session_id,
+      emoji: t.emoji,
+      color: t.color,
+      x: t.x,
+      y: t.y,
+      label: t.label,
+    })),
   };
 
   const encoder = new TextEncoder();

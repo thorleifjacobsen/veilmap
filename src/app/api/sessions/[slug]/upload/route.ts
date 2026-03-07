@@ -18,14 +18,21 @@ export async function POST(
   const { slug } = await params;
 
   // Check session ownership and pro status
-  const rows = await db`
-    SELECT s.id, s.owner_id, u.is_pro
-    FROM sessions s JOIN users u ON u.id = s.owner_id
-    WHERE s.slug = ${slug}
-  `;
-  if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (rows[0].owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  if (!rows[0].is_pro) return NextResponse.json({ error: 'Pro feature only' }, { status: 403 });
+  const row = await db.session.findUnique({
+    where: { slug },
+    select: {
+      id: true,
+      owner_id: true,
+      owner: {
+        select: {
+          is_pro: true,
+        },
+      },
+    },
+  });
+  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (row.owner_id !== session.user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!row.owner.is_pro) return NextResponse.json({ error: 'Pro feature only' }, { status: 403 });
 
   const formData = await req.formData();
   const file = formData.get('map') as File | null;
@@ -45,7 +52,13 @@ export async function POST(
   await writeFile(join(uploadPath, filename), buffer);
 
   const mapUrl = `/uploads/${filename}`;
-  await db`UPDATE sessions SET map_url = ${mapUrl}, updated_at = NOW() WHERE slug = ${slug}`;
+  await db.session.update({
+    where: { slug },
+    data: {
+      map_url: mapUrl,
+      updated_at: new Date(),
+    },
+  });
 
   return NextResponse.json({ map_url: mapUrl });
 }

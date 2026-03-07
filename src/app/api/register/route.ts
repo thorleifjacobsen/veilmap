@@ -13,17 +13,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
   }
 
-  const existing = await db`SELECT id FROM users WHERE email = ${email}`;
-  if (existing.length) {
+  const existing = await db.user.findUnique({ where: { email } });
+  if (existing) {
     return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
-  const result = await db`
-    INSERT INTO users (email, password_hash)
-    VALUES (${email}, ${passwordHash})
-    RETURNING id, email, created_at
-  `;
+  const result = await db.user.create({
+    data: { email, password_hash: passwordHash },
+    select: { id: true, email: true, created_at: true },
+  });
 
-  return NextResponse.json(result[0], { status: 201 });
+  return NextResponse.json(result, { status: 201 });
 }
