@@ -128,6 +128,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [gridMenuOpen, setGridMenuOpen] = useState<{ x: number; y: number } | null>(null);
   const [drawGridMode, setDrawGridMode] = useState(false);
   const [canvasCursor, setCanvasCursor] = useState<string>('crosshair');
+  const [htmlVpTransform, setHtmlVpTransform] = useState('translate(0px,0px) scale(1)');
 
   // Mutable refs for interaction state
   const vpRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
@@ -323,24 +324,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.fillStyle = '#0c0a08';
       ctx.fillRect(0, 0, MAP_W, MAP_H);
     }
-    // Draw map objects sorted by zIndex
-    const sorted = [...objectsRef.current].sort((a, b) => a.zIndex - b.zIndex);
-    sorted.forEach((obj) => {
-      if (!obj.visible) return;
-      const img = objectImagesRef.current.get(obj.id);
-      if (img) {
-        if (obj.rotation) {
-          ctx.save();
-          ctx.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
-          ctx.rotate((obj.rotation * Math.PI) / 180);
-          ctx.drawImage(img, -obj.w / 2, -obj.h / 2, obj.w, obj.h);
-          ctx.restore();
-        } else {
-          ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
-        }
-      }
-    });
+    // Objects are rendered in the HTML layer — no canvas drawing here
     ctx.restore();
+    // Sync HTML object layer transform with viewport
+    const vp = vpRef.current;
+    setHtmlVpTransform(`translate(${vp.x}px,${vp.y}px) scale(${vp.scale})`);
   }, []);
 
   const composeFogGM = useCallback(() => {
@@ -2065,8 +2053,43 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           onDrop={handleDrop}
         >
           <canvas ref={canvasMapRef} className="absolute inset-0" style={{ zIndex: 1, imageRendering: 'pixelated' }} />
-          <canvas ref={canvasBoxesRef} className="absolute inset-0" style={{ zIndex: 2, imageRendering: 'pixelated' }} />
-          <canvas ref={canvasFogGMRef} className="absolute inset-0 pointer-events-none" style={{ zIndex: 3, imageRendering: 'pixelated' }} />
+          {/* HTML object layer — GIFs animate, images render as DOM elements */}
+          <div
+            className="absolute pointer-events-none"
+            style={{
+              zIndex: 2,
+              transformOrigin: '0 0',
+              transform: htmlVpTransform,
+              width: MAP_W,
+              height: MAP_H,
+              overflow: 'hidden',
+            }}
+          >
+            {[...objects].sort((a, b) => a.zIndex - b.zIndex).map((obj) => {
+              if (!obj.visible) return null;
+              return (
+                <img
+                  key={obj.id}
+                  src={obj.src}
+                  alt={obj.name}
+                  draggable={false}
+                  style={{
+                    position: 'absolute',
+                    left: obj.x,
+                    top: obj.y,
+                    width: obj.w,
+                    height: obj.h,
+                    transform: obj.rotation ? `rotate(${obj.rotation}deg)` : undefined,
+                    transformOrigin: 'center center',
+                    pointerEvents: 'none',
+                    userSelect: 'none',
+                  }}
+                />
+              );
+            })}
+          </div>
+          <canvas ref={canvasBoxesRef} className="absolute inset-0" style={{ zIndex: 3, imageRendering: 'pixelated' }} />
+          <canvas ref={canvasFogGMRef} className="absolute inset-0 pointer-events-none" style={{ zIndex: 4, imageRendering: 'pixelated' }} />
           <canvas ref={canvasTopRef} className="absolute inset-0 pointer-events-none" style={{ zIndex: 5, imageRendering: 'pixelated' }} />
           <canvas
             ref={canvasInterRef}
