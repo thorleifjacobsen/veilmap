@@ -45,8 +45,10 @@ const TYPE_COLORS: Record<string, string> = {
   autoReveal: '#c8963e', trigger: '#a080e0', hazard: '#e05c2a', note: '#5aba6a', hidden: '#555',
 };
 const MAX_UNDO = 20;
+const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a polygon
+const MIN_OBJECT_SIZE = 20; // px — minimum object width/height when resizing
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
-  box: 'Drag to draw a meta box',
+  box: 'Click to place polygon vertices, click near first to close',
   select: 'Click a box or token to select/edit — drag tokens to move',
   measure: 'Drag to measure distance in feet & squares',
   torch: 'Click to place a flickering torch',
@@ -529,7 +531,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       if (pts.length >= 3) {
         const first = pts[0];
         const snapDist = Math.hypot(snap(mp.mx, gs) - first.x, snap(mp.my, gs) - first.y);
-        if (snapDist < 15) {
+        if (snapDist < POLYGON_SNAP_DISTANCE) {
           ctx.strokeStyle = 'rgba(100,255,100,.6)';
           ctx.lineWidth = 2 / vp.scale;
           ctx.beginPath();
@@ -860,7 +862,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       const gs = gridSizeRef.current;
       const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
       const w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
-      if (w < 20 || h < 20) {
+      if (w < MIN_OBJECT_SIZE || h < MIN_OBJECT_SIZE) {
         showNotif('Too small');
         return;
       }
@@ -1191,7 +1193,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         // Check if closing the polygon (click near first point)
         if (polyPts.length >= 3) {
           const first = polyPts[0];
-          if (Math.hypot(sx2 - first.x, sy2 - first.y) < 15) {
+          if (Math.hypot(sx2 - first.x, sy2 - first.y) < POLYGON_SNAP_DISTANCE) {
             finalizePolygon(polyPts);
             polyPointsRef.current = [];
             drawTop();
@@ -1277,10 +1279,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const orig = r.origObj;
         let nx = orig.x, ny = orig.y, nw = orig.w, nh = orig.h;
         const dx = mp.x - r.startX, dy = mp.y - r.startY;
-        if (r.corner.includes('r')) { nw = Math.max(20, orig.w + dx); }
-        if (r.corner.includes('l')) { nx = orig.x + dx; nw = Math.max(20, orig.w - dx); }
-        if (r.corner.includes('b')) { nh = Math.max(20, orig.h + dy); }
-        if (r.corner.includes('t')) { ny = orig.y + dy; nh = Math.max(20, orig.h - dy); }
+        if (r.corner.includes('r')) { nw = Math.max(MIN_OBJECT_SIZE, orig.w + dx); }
+        if (r.corner.includes('l')) { nx = orig.x + dx; nw = Math.max(MIN_OBJECT_SIZE, orig.w - dx); }
+        if (r.corner.includes('b')) { nh = Math.max(MIN_OBJECT_SIZE, orig.h + dy); }
+        if (r.corner.includes('t')) { ny = orig.y + dy; nh = Math.max(MIN_OBJECT_SIZE, orig.h - dy); }
         const updated = objectsRef.current.map(o =>
           o.id === r.objId ? { ...o, x: nx, y: ny, w: nw, h: nh } : o
         );

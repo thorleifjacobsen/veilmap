@@ -351,7 +351,7 @@ export default function RightPanel({
         {tokens.length > 0 && (
           <div className="mb-1 max-h-[80px] overflow-y-auto">
             {tokens.map((t) => (
-              <div key={t.id} className="flex items-center gap-1 px-1 py-0.5 text-[.68rem] rounded hover:bg-[rgba(200,150,62,.05)]">
+              <div key={t.id} role="listitem" className="flex items-center gap-1 px-1 py-0.5 text-[.68rem] rounded hover:bg-[rgba(200,150,62,.05)]" tabIndex={0}>
                 <span>{t.emoji}</span>
                 <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t.label || t.emoji}</span>
               </div>
