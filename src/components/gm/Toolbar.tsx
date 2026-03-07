@@ -1,12 +1,12 @@
 'use client';
 
-type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'token' | 'torch' | 'ping' | 'measure';
+type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'token' | 'torch' | 'ping' | 'measure' | 'camera';
 
 const BRUSH_SIZES = [
-  { radius: 15, dotSize: 6 },
-  { radius: 36, dotSize: 11 },
-  { radius: 70, dotSize: 17 },
-  { radius: 130, dotSize: 24 },
+  { radius: 15, dotSize: 8, key: '1' },
+  { radius: 36, dotSize: 13, key: '2' },
+  { radius: 70, dotSize: 19, key: '3' },
+  { radius: 130, dotSize: 26, key: '4' },
 ];
 
 interface ToolbarProps {
@@ -30,7 +30,7 @@ export default function Toolbar({
 }: ToolbarProps) {
   return (
     <div
-      className="flex w-[54px] flex-shrink-0 flex-col items-center gap-px py-1.5"
+      className="flex w-[62px] flex-shrink-0 flex-col items-center gap-px py-1.5"
       style={{
         background: '#100f18',
         borderRight: '1px solid rgba(200,150,62,.2)',
@@ -66,19 +66,26 @@ export default function Toolbar({
           {BRUSH_SIZES.map((b) => (
             <div
               key={b.radius}
-              className="flex-shrink-0 cursor-pointer rounded-full transition-all"
-              style={{
-                width: b.dotSize,
-                height: b.dotSize,
-                background: brushRadius === b.radius ? '#c8963e' : '#d4c4a0',
-                opacity: brushRadius === b.radius ? 1 : 0.3,
-                border:
-                  brushRadius === b.radius
-                    ? '1.5px solid #c8963e'
-                    : '1.5px solid transparent',
-              }}
+              className="flex items-center gap-1 cursor-pointer"
               onClick={() => onBrushChange(b.radius)}
-            />
+            >
+              <span
+                className="text-[.38rem] w-3 text-right"
+                style={{ fontFamily: "'Cinzel',serif", color: brushRadius === b.radius ? '#c8963e' : 'rgba(212,196,160,.3)' }}
+              >
+                {b.key}
+              </span>
+              <div
+                className="flex-shrink-0 rounded-full transition-all"
+                style={{
+                  width: b.dotSize,
+                  height: b.dotSize,
+                  background: brushRadius === b.radius ? '#c8963e' : '#d4c4a0',
+                  opacity: brushRadius === b.radius ? 1 : 0.3,
+                  border: brushRadius === b.radius ? '1.5px solid #c8963e' : '1.5px solid transparent',
+                }}
+              />
+            </div>
           ))}
         </div>
       </ToolGroup>
@@ -128,6 +135,13 @@ export default function Toolbar({
       {/* View group */}
       <ToolGroup label="View">
         <ToolBtn
+          icon={<CameraIcon />}
+          label="Camera"
+          kbd="C"
+          active={activeTool === 'camera'}
+          onClick={() => onToolChange('camera')}
+        />
+        <ToolBtn
           icon={<RulerIcon />}
           label="Ruler"
           kbd="M"
@@ -153,7 +167,7 @@ function ToolGroup({ label, children }: { label: string; children: React.ReactNo
       style={{ borderBottom: '1px solid rgba(200,150,62,.2)' }}
     >
       <div
-        className="text-[.37rem] uppercase tracking-[.1em]"
+        className="text-[.42rem] uppercase tracking-[.1em]"
         style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
       >
         {label}
@@ -178,7 +192,7 @@ function ToolBtn({
 }) {
   return (
     <button
-      className="relative flex h-10 w-10 cursor-pointer flex-col items-center justify-center gap-px rounded transition-all"
+      className="relative flex h-11 w-11 cursor-pointer flex-col items-center justify-center gap-px rounded transition-all"
       style={{
         border: active ? '1px solid #c8963e' : '1px solid transparent',
         background: active ? 'rgba(200,150,62,.15)' : 'transparent',
@@ -188,14 +202,14 @@ function ToolBtn({
     >
       {icon}
       <span
-        className="text-[.35rem] tracking-[.04em]"
+        className="text-[.42rem] tracking-[.04em]"
         style={{ fontFamily: "'Cinzel',serif", opacity: 0.65 }}
       >
         {label}
       </span>
       {kbd && (
         <span
-          className="absolute right-[3px] top-[2px] text-[.35rem]"
+          className="absolute right-[3px] top-[2px] text-[.40rem]"
           style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
         >
           {kbd}
@@ -211,7 +225,7 @@ const svgProps = {
   fill: 'none',
   stroke: 'currentColor',
   strokeWidth: 1.5,
-  className: 'w-4 h-4',
+  className: 'w-5 h-5',
 };
 
 function EyeIcon() {
@@ -289,6 +303,15 @@ function RulerIcon() {
   return (
     <svg {...svgProps}>
       <path d="M2 12h20M2 12l4-4M2 12l4 4M22 12l-4-4M22 12l-4 4" />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg {...svgProps}>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <rect x="6" y="8" width="12" height="8" rx="1" strokeDasharray="2 2" />
     </svg>
   );
 }

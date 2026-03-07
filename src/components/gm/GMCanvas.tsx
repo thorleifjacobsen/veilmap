@@ -33,7 +33,7 @@ import ContextMenu, { type ContextMenuState } from './ContextMenu';
 
 // ── Types ──
 
-type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'token' | 'torch' | 'ping' | 'measure';
+type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'token' | 'torch' | 'ping' | 'measure' | 'camera';
 
 interface Ping { x: number; y: number; born: number }
 interface Torch { x: number; y: number; r: number; id: number }
