@@ -42,6 +42,7 @@ model Session {
   grid_color     String   @default("#c8963e")
   grid_opacity   Float    @default(0.25) @db.Real
   measurement_unit String  @default("feet")
+  fog_style      String   @default("solid")
   camera_x       Float?   @db.Real
   camera_y       Float?   @db.Real
   camera_w       Float?   @db.Real

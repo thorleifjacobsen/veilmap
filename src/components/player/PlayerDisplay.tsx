@@ -4,6 +4,7 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { Session, SSEEvent, FogPaintPayload, FogSnapshotPayload, FullStatePayload, MapObject, CameraViewport, BlackoutPayload, CameraMovePayload } from '@/types';
 import { MAP_W, MAP_H, createFogCanvas, paintHide, revealBox as revealBoxFog, loadFogFromBase64, animateReveal } from '@/lib/fog-engine';
 import { applyViewport, hexToRgba, type Viewport } from '@/lib/viewport';
+import { renderAnimatedFog } from '@/lib/animated-fog';
 import PrepScreen from './PrepScreen';
 
 export default function PlayerDisplay({ slug }: { slug: string }) {
@@ -20,6 +21,7 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const pingsRef = useRef<Array<{ x: number; y: number; born: number }>>([]);
   const gridRef = useRef<{ show: boolean; size: number; color: string; opacity: number }>({ show: false, size: 32, color: '#c8963e', opacity: 0.25 });
+  const fogStyleRef = useRef<'solid' | 'animated'>('solid');
   const [connected, setConnected] = useState(false);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
@@ -155,6 +157,10 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     applyViewport(ctxFog, vp);
     ctxFog.globalAlpha = 1.0;
     ctxFog.drawImage(fogCanvas, 0, 0);
+    // Animated fog overlay
+    if (fogStyleRef.current === 'animated') {
+      renderAnimatedFog(ctxFog, fogCanvas, Date.now() / 1000, MAP_W, MAP_H);
+    }
     ctxFog.globalAlpha = 1;
 
     // Draw grid above fog so it's always visible
@@ -282,6 +288,10 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           // Set blackout
           const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
           if (bl) setBlackout(bl);
+          // Set fog style
+          if (p.session.fog_style) {
+            fogStyleRef.current = p.session.fog_style as 'solid' | 'animated';
+          }
           break;
         }
         case 'fog:paint': {

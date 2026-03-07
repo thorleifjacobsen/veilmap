@@ -51,6 +51,7 @@ export interface Session {
   grid_color: string;
   grid_opacity: number;
   measurement_unit: string;
+  fog_style: string;
   camera_x: number | null;
   camera_y: number | null;
   camera_w: number | null;

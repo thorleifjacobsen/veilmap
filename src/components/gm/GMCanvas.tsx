@@ -36,6 +36,7 @@ import RightPanel from './RightPanel';
 import BoxEditor from './BoxEditor';
 import SettingsModal from './SettingsModal';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
+import { renderAnimatedFog } from '@/lib/animated-fog';
 
 // ── Types ──
 
@@ -132,6 +133,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [gridOpacity, setGridOpacity] = useState(session.grid_opacity ?? 0.25);
   const [measurementUnit, setMeasurementUnit] = useState<'feet' | 'meters'>((session.measurement_unit as 'feet' | 'meters') || 'feet');
   const [measureMenuOpen, setMeasureMenuOpen] = useState<{ x: number; y: number } | null>(null);
+  const [fogStyle, setFogStyle] = useState<'solid' | 'animated'>((session.fog_style as 'solid' | 'animated') || 'solid');
   const [prepMessage, setPrepMessage] = useState(session.prep_message || 'Preparing next scene…');
   const [sessionName, setSessionName] = useState(session.name);
   const [boxes, setBoxes] = useState<Box[]>(session.boxes || []);
@@ -192,6 +194,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const brushRadiusRef = useRef(36);
   const showGridRef = useRef(session.show_grid ?? false);
   const measurementUnitRef = useRef<'feet' | 'meters'>((session.measurement_unit as 'feet' | 'meters') || 'feet');
+  const fogStyleRef = useRef<'solid' | 'animated'>((session.fog_style as 'solid' | 'animated') || 'solid');
+  const fogAnimRafRef = useRef<number>(0);
   const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
   const cameraRef = useRef<CameraViewport>(
     session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null
@@ -219,6 +223,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { brushRadiusRef.current = brushRadius; }, [brushRadius]);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
   useEffect(() => { measurementUnitRef.current = measurementUnit; }, [measurementUnit]);
+  useEffect(() => { fogStyleRef.current = fogStyle; }, [fogStyle]);
   useEffect(() => { blackoutActiveRef.current = blackoutActive; }, [blackoutActive]);
   useEffect(() => { selectedObjectIdRef.current = selectedObjectId; }, [selectedObjectId]);
   useEffect(() => { snapToGridRef.current = snapToGrid; }, [snapToGrid]);
@@ -373,6 +378,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     applyViewport(ctx, vpRef.current);
     ctx.globalAlpha = gmFogOpacityRef.current;
     ctx.drawImage(fogCanvas, 0, 0);
+    // Animated fog overlay
+    if (fogStyleRef.current === 'animated') {
+      renderAnimatedFog(ctx, fogCanvas, Date.now() / 1000, MAP_W, MAP_H);
+    }
     ctx.globalAlpha = 1;
     ctx.restore();
   }, []);
@@ -1143,6 +1152,37 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { composeFogGM(); }, [gmFogOpacity, composeFogGM]);
   // Redraw map when grid toggles or gridSize/color/opacity changes
   useEffect(() => { drawMap(); }, [showGrid, gridSize, gridColor, gridOpacity, drawMap]);
+
+  // Animated fog animation loop
+  useEffect(() => {
+    if (fogStyle !== 'animated') {
+      if (fogAnimRafRef.current) cancelAnimationFrame(fogAnimRafRef.current);
+      fogAnimRafRef.current = 0;
+      composeFogGM(); // Redraw once to clear animation artifacts
+      return;
+    }
+    let droppedFrames = 0;
+    let lastFrameTime = performance.now();
+    const animate = () => {
+      const now = performance.now();
+      const dt = now - lastFrameTime;
+      lastFrameTime = now;
+      // Auto-disable if sustained dropped frames (>50ms per frame = <20fps)
+      if (dt > 50) droppedFrames++;
+      else droppedFrames = Math.max(0, droppedFrames - 1);
+      if (droppedFrames > 30) {
+        setFogStyle('solid');
+        fogStyleRef.current = 'solid';
+        return;
+      }
+      composeFogGM();
+      fogAnimRafRef.current = requestAnimationFrame(animate);
+    };
+    fogAnimRafRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (fogAnimRafRef.current) cancelAnimationFrame(fogAnimRafRef.current);
+    };
+  }, [fogStyle, composeFogGM]);
 
   // Persist showGrid/gridSize/gridColor/gridOpacity and broadcast to player when they change
   useEffect(() => {
@@ -2441,6 +2481,16 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         onPrepMessageChange={setPrepMessage}
         sessionName={sessionName}
         onSessionNameChange={setSessionName}
+        fogStyle={fogStyle}
+        onFogStyleChange={(v) => {
+          setFogStyle(v);
+          fogStyleRef.current = v;
+          fetch(`/api/sessions/${slug}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fog_style: v }),
+          }).catch(() => {});
+        }}
       />
       <ContextMenu
         state={contextMenu}
