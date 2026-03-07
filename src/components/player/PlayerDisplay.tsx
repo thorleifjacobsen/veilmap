@@ -147,8 +147,15 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   // Helper to preload object images
   const loadObjectImages = useCallback((objs: MapObject[]) => {
     objectsRef.current = objs;
+    // Clean up stale image entries
+    const currentIds = new Set(objs.map(o => o.id));
+    for (const id of objectImagesRef.current.keys()) {
+      if (!currentIds.has(id)) objectImagesRef.current.delete(id);
+    }
     objs.forEach((obj) => {
-      if (objectImagesRef.current.has(obj.id)) return;
+      // Always reload if image not yet loaded or src changed
+      const existing = objectImagesRef.current.get(obj.id);
+      if (existing && existing.src === obj.src) return;
       const img = new Image();
       img.onload = () => { objectImagesRef.current.set(obj.id, img); };
       img.src = obj.src;
@@ -354,7 +361,7 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   }
 
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-black">
+    <div ref={containerRef} className="fixed inset-0 bg-black" onContextMenu={(e) => e.preventDefault()}>
       <canvas ref={canvasRef} className="w-full h-full block" />
       <div className="absolute inset-0 pointer-events-none" style={{
         background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.7) 100%)',

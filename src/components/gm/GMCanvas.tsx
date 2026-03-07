@@ -70,6 +70,11 @@ function snap(v: number, gridSize: number) {
   return Math.round(v / gridSize) * gridSize;
 }
 
+/** Snap a value to the center of the nearest grid cell */
+function snapCenter(v: number, gridSize: number) {
+  return Math.floor(v / gridSize) * gridSize + gridSize / 2;
+}
+
 // ── Component ──
 
 type CameraInteraction = 'idle' | 'dragging' | 'resizing-tl' | 'resizing-tr' | 'resizing-bl' | 'resizing-br' | 'drawing';
@@ -610,12 +615,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         ctx.lineWidth = 2 / vp.scale;
         ctx.setLineDash([]);
         ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
-        const hs = 8 / vp.scale;
+        const hs = 12 / vp.scale;
         ctx.fillStyle = 'rgba(0,180,255,.9)';
         [[obj.x, obj.y], [obj.x + obj.w, obj.y], [obj.x, obj.y + obj.h], [obj.x + obj.w, obj.y + obj.h]].forEach(([cx, cy]) => {
           ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
         });
-        const ms = 6 / vp.scale;
+        const ms = 10 / vp.scale;
         [[obj.x + obj.w / 2, obj.y], [obj.x + obj.w / 2, obj.y + obj.h], [obj.x, obj.y + obj.h / 2], [obj.x + obj.w, obj.y + obj.h / 2]].forEach(([cx, cy]) => {
           ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
         });
@@ -642,6 +647,34 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.restore();
     }
 
+    // Draw Grid Size preview rectangle
+    if (gridDrawStartRef.current) {
+      const mp = mousePosRef.current;
+      const ds = gridDrawStartRef.current;
+      ctx.save();
+      applyViewport(ctx, vp);
+      const gx = Math.min(ds.x, mp.mx);
+      const gy = Math.min(ds.y, mp.my);
+      const gw = Math.abs(mp.mx - ds.x);
+      const gh = Math.abs(mp.my - ds.y);
+      ctx.strokeStyle = 'rgba(0,255,120,.8)';
+      ctx.lineWidth = 2 / vp.scale;
+      ctx.setLineDash([6 / vp.scale, 3 / vp.scale]);
+      ctx.strokeRect(gx, gy, gw, gh);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(0,255,120,.06)';
+      ctx.fillRect(gx, gy, gw, gh);
+      // Show size text
+      const sizeText = `${Math.round(Math.max(gw, gh))}px`;
+      const fontSize = 14 / vp.scale;
+      ctx.font = `bold ${fontSize}px Cinzel,serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(0,255,120,.9)';
+      ctx.fillText(sizeText, gx + gw / 2, gy + gh / 2);
+      ctx.restore();
+    }
+
     // Animation loop
     const needs =
       torchesRef.current.length > 0 ||
@@ -649,7 +682,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       (toolRef.current === 'box' && (drawStartRef.current || polyPointsRef.current.length > 0)) ||
       (toolRef.current === 'measure' && measureStartRef.current) ||
       (pendingTokenRef.current && toolRef.current === 'token') ||
-      (toolRef.current === 'camera' && cameraDragRef.current);
+      (toolRef.current === 'camera' && cameraDragRef.current) ||
+      gridDrawStartRef.current;
     if (needs && !topLoopRef.current) {
       topLoopRef.current = true;
       requestAnimationFrame(() => {
@@ -1147,7 +1181,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       if (toolRef.current === 'select') {
         const selObj = selectedObjectIdRef.current ? objectsRef.current.find(o => o.id === selectedObjectIdRef.current) : null;
         if (selObj) {
-          const hs = 12 / vpRef.current.scale;
+          const hs = 18 / vpRef.current.scale;
           const corners = [
             { corner: 'tl', x: selObj.x, y: selObj.y },
             { corner: 'tr', x: selObj.x + selObj.w, y: selObj.y },
@@ -1261,8 +1295,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             const gs = gridSizeRef.current;
             const objCenterX = newX + obj.w / 2;
             const objCenterY = newY + obj.h / 2;
-            newX = snap(objCenterX, gs) - obj.w / 2;
-            newY = snap(objCenterY, gs) - obj.h / 2;
+            newX = snapCenter(objCenterX, gs) - obj.w / 2;
+            newY = snapCenter(objCenterY, gs) - obj.h / 2;
           }
           const updated = objectsRef.current.map(o =>
             o.id === drag.objId ? { ...o, x: newX, y: newY } : o
@@ -1361,7 +1395,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
 
-      if (['box', 'measure', 'select', 'token'].includes(toolRef.current)) {
+      if (['box', 'measure', 'select', 'token'].includes(toolRef.current) || gridDrawStartRef.current) {
         drawTop();
       }
     },
@@ -1892,7 +1926,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   // ── Render ──
 
   return (
-    <div className="flex h-full flex-col select-none" style={{ background: '#07060c', fontFamily: "'Crimson Pro',Georgia,serif", color: '#d4c4a0' }}>
+    <div className="flex h-full flex-col select-none" style={{ background: '#07060c', fontFamily: "'Crimson Pro',Georgia,serif", color: '#d4c4a0' }} onContextMenu={(e) => { /* Allow canvas right-click for context menu; prevent elsewhere */ if (!(e.target instanceof HTMLCanvasElement)) e.preventDefault(); }}>
       {/* Header */}
       <header
         className="z-50 flex flex-shrink-0 items-center justify-between px-3 py-[7px]"

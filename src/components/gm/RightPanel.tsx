@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import type { Box, Token, MapObject, SessionExport } from '@/types';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -10,19 +10,6 @@ const TYPE_COLORS: Record<string, string> = {
   note: '#5aba6a',
   hidden: '#555',
 };
-
-const TOKEN_PALETTE: { emoji: string; color: string }[] = [
-  { emoji: '⚔️', color: '#e05c2a' },
-  { emoji: '🧙', color: '#6a4fc8' },
-  { emoji: '🗡️', color: '#2a8a4a' },
-  { emoji: '✨', color: '#d4a017' },
-  { emoji: '🐉', color: '#c8300a' },
-  { emoji: '👺', color: '#4a8a2a' },
-  { emoji: '💀', color: '#9a9a9a' },
-  { emoji: '🔥', color: '#e07820' },
-  { emoji: '🧝', color: '#3a9a7a' },
-  { emoji: '🐺', color: '#7a6a5a' },
-];
 
 interface RightPanelProps {
   boxes: Box[];
@@ -48,7 +35,6 @@ interface RightPanelProps {
 
 export default function RightPanel({
   boxes,
-  tokens,
   objects,
   selectedBoxId,
   selectedObjectId,
@@ -56,8 +42,6 @@ export default function RightPanel({
   onBoxClick,
   onRevealAll,
   onClearBoxes,
-  onQueueToken,
-  onClearTokens,
   onMapUpload,
   onExport,
   onImport,
@@ -65,14 +49,14 @@ export default function RightPanel({
   onObjectUpdate,
   onObjectDelete,
   onObjectReorder,
-  onTokenUpload,
 }: RightPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const tokenUploadRef = useRef<HTMLInputElement>(null);
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
   const [editNameValue, setEditNameValue] = useState('');
+  const [objectMenuId, setObjectMenuId] = useState<string | null>(null);
+  const [objectMenuPos, setObjectMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   const handleMapChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -123,15 +107,6 @@ export default function RightPanel({
     [onImport],
   );
 
-  const handleTokenUpload = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const f = e.target.files?.[0];
-      if (f && onTokenUpload) onTokenUpload(f);
-      e.target.value = '';
-    },
-    [onTokenUpload],
-  );
-
   const startEditName = (obj: MapObject) => {
     setEditingNameId(obj.id);
     setEditNameValue(obj.name);
@@ -143,6 +118,21 @@ export default function RightPanel({
     }
     setEditingNameId(null);
   };
+
+  const openObjectMenu = (e: React.MouseEvent, objId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setObjectMenuId(objId);
+    setObjectMenuPos({ x: e.clientX, y: e.clientY });
+  };
+
+  // Close object context menu on click-away
+  useEffect(() => {
+    if (!objectMenuId) return;
+    const close = () => { setObjectMenuId(null); setObjectMenuPos(null); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [objectMenuId]);
 
   // Sort objects by zIndex descending (highest on top)
   const sortedObjects = [...objects].sort((a, b) => b.zIndex - a.zIndex);
@@ -156,7 +146,7 @@ export default function RightPanel({
       }}
     >
       {/* Objects (layer panel) section */}
-      <PanelSection>
+      <PanelSection grow>
         <PanelTitle>
           Objects{' '}
           <span className="ml-auto flex items-center gap-1">
@@ -208,20 +198,21 @@ export default function RightPanel({
           </div>
         ) : (
           <div
-            className="max-h-[180px] overflow-y-auto"
+            className="max-h-[260px] overflow-y-auto"
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleObjectDrop}
           >
             {sortedObjects.map((obj) => (
               <div
                 key={obj.id}
-                className="mb-0.5 flex cursor-pointer items-center gap-1 rounded border px-1 py-0.5 text-[.72rem] transition-all hover:bg-[rgba(200,150,62,.05)]"
+                className="mb-0.5 flex cursor-pointer items-center gap-1.5 rounded border px-1 py-0.5 text-[.72rem] transition-all hover:bg-[rgba(200,150,62,.05)]"
                 style={{
                   borderColor: selectedObjectId === obj.id ? '#c8963e' : 'transparent',
                   background: selectedObjectId === obj.id ? 'rgba(200,150,62,.07)' : 'transparent',
                   opacity: obj.visible ? 1 : 0.4,
                 }}
                 onClick={() => onObjectSelect(selectedObjectId === obj.id ? null : obj.id)}
+                onContextMenu={(e) => openObjectMenu(e, obj.id)}
               >
                 {/* Thumbnail */}
                 <div
@@ -250,30 +241,13 @@ export default function RightPanel({
                     {obj.name}
                   </span>
                 )}
-                {/* Controls */}
-                <div className="flex flex-shrink-0 items-center gap-px">
-                  <MiniBtn
-                    title={obj.visible ? 'Hide' : 'Show'}
-                    onClick={() => onObjectUpdate(obj.id, { visible: !obj.visible })}
-                  >
-                    {obj.visible ? '👁' : '👁‍🗨'}
-                  </MiniBtn>
-                  <MiniBtn
-                    title={obj.locked ? 'Unlock' : 'Lock'}
-                    onClick={() => onObjectUpdate(obj.id, { locked: !obj.locked })}
-                  >
-                    {obj.locked ? '🔒' : '🔓'}
-                  </MiniBtn>
-                  <MiniBtn title="Move up" onClick={() => onObjectReorder(obj.id, 'up')}>
-                    ▲
-                  </MiniBtn>
-                  <MiniBtn title="Move down" onClick={() => onObjectReorder(obj.id, 'down')}>
-                    ▼
-                  </MiniBtn>
-                  <MiniBtn title="Delete" onClick={() => onObjectDelete(obj.id)}>
-                    ✕
-                  </MiniBtn>
-                </div>
+                {/* Minimal controls — just visibility toggle */}
+                <MiniBtn
+                  title={obj.visible ? 'Hide (GM)' : 'Show (GM)'}
+                  onClick={() => onObjectUpdate(obj.id, { visible: !obj.visible })}
+                >
+                  {obj.visible ? '👁' : '—'}
+                </MiniBtn>
               </div>
             ))}
             <div
@@ -336,55 +310,6 @@ export default function RightPanel({
         </SmallBtn>
       </PanelSection>
 
-      {/* Tokens section */}
-      <PanelSection grow>
-        <PanelTitle>
-          Tokens{' '}
-          <span className="ml-auto flex items-center gap-1">
-            <span className="text-[.58rem]" style={{ color: 'rgba(212,196,160,.4)' }}>
-              {tokens.length}
-            </span>
-          </span>
-        </PanelTitle>
-
-        {/* Placed tokens list */}
-        {tokens.length > 0 && (
-          <div className="mb-1 max-h-[80px] overflow-y-auto">
-            {tokens.map((t) => (
-              <div key={t.id} role="listitem" className="flex items-center gap-1 px-1 py-0.5 text-[.68rem] rounded hover:bg-[rgba(200,150,62,.05)]" tabIndex={0}>
-                <span>{t.emoji}</span>
-                <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{t.label || t.emoji}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Quick token palette (built-in) */}
-        <div className="grid grid-cols-5 gap-1">
-          {TOKEN_PALETTE.map((t) => (
-            <div
-              key={t.emoji}
-              className="flex aspect-square cursor-pointer items-center justify-center rounded-full text-[.8rem] transition-all hover:scale-110 hover:border-[#c8963e]"
-              style={{
-                border: '1.5px solid rgba(200,150,62,.2)',
-                background: 'rgba(0,0,0,.3)',
-              }}
-              onClick={() => onQueueToken(t.emoji, t.color)}
-              title={`Place ${t.emoji}`}
-            >
-              {t.emoji}
-            </div>
-          ))}
-        </div>
-
-        {/* Upload custom token */}
-        <input ref={tokenUploadRef} type="file" accept="image/*" className="hidden" onChange={handleTokenUpload} />
-        <SmallBtn onClick={() => tokenUploadRef.current?.click()}>↑ Upload Token Image</SmallBtn>
-        <SmallBtn red onClick={onClearTokens}>
-          ✕ Clear Tokens
-        </SmallBtn>
-      </PanelSection>
-
       {/* Export/Import section */}
       <PanelSection>
         <PanelTitle>Session Data</PanelTitle>
@@ -400,6 +325,66 @@ export default function RightPanel({
           ↑ Import .veilmap.json
         </SmallBtn>
       </PanelSection>
+
+      {/* Object right-click context menu */}
+      {objectMenuId && objectMenuPos && (
+        <div
+          className="fixed z-[900] rounded border shadow-lg py-1"
+          style={{ left: objectMenuPos.x, top: objectMenuPos.y, background: '#100f18', borderColor: 'rgba(200,150,62,.3)', minWidth: 160 }}
+        >
+          {(() => {
+            const obj = objects.find(o => o.id === objectMenuId);
+            if (!obj) return null;
+            return (
+              <>
+                <div
+                  className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                  style={{ fontFamily: "'Cinzel',serif", color: '#d4c4a0' }}
+                  onClick={() => { startEditName(obj); setObjectMenuId(null); }}
+                >
+                  ✏️ Rename
+                </div>
+                <div
+                  className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                  style={{ fontFamily: "'Cinzel',serif", color: '#d4c4a0' }}
+                  onClick={() => { onObjectUpdate(obj.id, { visible: !obj.visible }); setObjectMenuId(null); }}
+                >
+                  {obj.visible ? '👁 Hide (GM)' : '👁 Show (GM)'}
+                </div>
+                <div
+                  className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                  style={{ fontFamily: "'Cinzel',serif", color: '#d4c4a0' }}
+                  onClick={() => { onObjectUpdate(obj.id, { locked: !obj.locked }); setObjectMenuId(null); }}
+                >
+                  {obj.locked ? '🔓 Unlock' : '🔒 Lock'}
+                </div>
+                <div
+                  className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                  style={{ fontFamily: "'Cinzel',serif", color: '#d4c4a0' }}
+                  onClick={() => { onObjectReorder(obj.id, 'up'); setObjectMenuId(null); }}
+                >
+                  ▲ Move Up
+                </div>
+                <div
+                  className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                  style={{ fontFamily: "'Cinzel',serif", color: '#d4c4a0' }}
+                  onClick={() => { onObjectReorder(obj.id, 'down'); setObjectMenuId(null); }}
+                >
+                  ▼ Move Down
+                </div>
+                <div style={{ borderTop: '1px solid rgba(200,150,62,.15)', margin: '2px 0' }} />
+                <div
+                  className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                  style={{ fontFamily: "'Cinzel',serif", color: '#e05c2a' }}
+                  onClick={() => { onObjectDelete(obj.id); setObjectMenuId(null); }}
+                >
+                  ✕ Delete
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }

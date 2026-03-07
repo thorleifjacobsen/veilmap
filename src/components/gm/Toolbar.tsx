@@ -70,15 +70,10 @@ export default function Toolbar({
           {BRUSH_SIZES.map((b) => (
             <div
               key={b.radius}
-              className="flex items-center gap-1 cursor-pointer"
+              className="flex items-center justify-center cursor-pointer"
               onClick={() => onBrushChange(b.radius)}
+              title={`Brush ${b.key} (Key ${b.key})`}
             >
-              <span
-                className="text-[.46rem] w-3 text-right"
-                style={{ fontFamily: "'Cinzel',serif", color: brushRadius === b.radius ? '#c8963e' : 'rgba(212,196,160,.3)' }}
-              >
-                {b.key}
-              </span>
               <div
                 className="flex-shrink-0 rounded-full transition-all"
                 style={{
@@ -207,6 +202,7 @@ function ToolBtn({
       }}
       onClick={onClick}
       onContextMenu={onContextMenu}
+      title={kbd ? `${label} (${kbd})` : label}
     >
       {icon}
       <span
@@ -215,14 +211,6 @@ function ToolBtn({
       >
         {label}
       </span>
-      {kbd && (
-        <span
-          className="absolute right-[3px] top-[2px] text-[.48rem]"
-          style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
-        >
-          {kbd}
-        </span>
-      )}
     </button>
   );
 }
