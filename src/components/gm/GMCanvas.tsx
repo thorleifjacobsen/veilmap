@@ -1374,6 +1374,17 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     [drawMap, showNotif],
   );
 
+  const broadcastObjects = useCallback(
+    (objs: MapObject[]) => {
+      fetch(`/api/sessions/${slug}/fog`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objects: objs }),
+      }).catch(() => {});
+    },
+    [slug],
+  );
+
   const handleObjectAdd = useCallback(
     (file: File) => {
       if (!file.type.startsWith('image/')) return;
@@ -1404,18 +1415,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           setObjects(updated);
           drawMap();
           showNotif(`Added: ${newObj.name}`);
-          // Broadcast objects to player
-          fetch(`/api/sessions/${slug}/fog`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ objects: updated }),
-          }).catch(() => {});
+          broadcastObjects(updated);
         };
         img.src = src;
       };
       reader.readAsDataURL(file);
     },
-    [drawMap, showNotif],
+    [drawMap, showNotif, broadcastObjects],
   );
 
   const handleObjectUpdate = useCallback(
@@ -1426,14 +1432,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       objectsRef.current = updated;
       setObjects(updated);
       drawMap();
-      // Broadcast objects to player
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ objects: updated }),
-      }).catch(() => {});
+      broadcastObjects(updated);
     },
-    [drawMap, slug],
+    [drawMap, broadcastObjects],
   );
 
   const handleObjectDelete = useCallback(
@@ -1443,14 +1444,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       objectImagesRef.current.delete(id);
       setObjects(updated);
       drawMap();
-      // Broadcast objects to player
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ objects: updated }),
-      }).catch(() => {});
+      broadcastObjects(updated);
     },
-    [drawMap, slug],
+    [drawMap, broadcastObjects],
   );
 
   const handleObjectReorder = useCallback(
@@ -1466,14 +1462,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       objectsRef.current = sorted;
       setObjects([...sorted]);
       drawMap();
-      // Broadcast objects to player
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ objects: sorted }),
-      }).catch(() => {});
+      broadcastObjects(sorted);
     },
-    [drawMap, slug],
+    [drawMap, broadcastObjects],
   );
 
   const handleRevealAll = useCallback(() => {
@@ -1799,7 +1790,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                 }}
                 className="h-48 w-3 appearance-none rounded-full"
                 style={{
-                  writingMode: 'vertical-lr' as React.CSSProperties['writingMode'],
+                  writingMode: 'vertical-lr',
                   direction: 'rtl',
                   accentColor: '#c8963e',
                   background: 'rgba(200,150,62,.15)',
