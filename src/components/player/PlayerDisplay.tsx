@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import type { Session, SSEEvent, FogPaintPayload, FogSnapshotPayload, FullStatePayload } from '@/types';
-import { MAP_W, MAP_H, createFogCanvas, paintReveal, paintHide, revealBox as revealBoxFog, loadFogFromBase64 } from '@/lib/fog-engine';
-import { fitToContainer, applyViewport, type Viewport } from '@/lib/viewport';
+import type { Session, SSEEvent, FogPaintPayload, FogSnapshotPayload, FullStatePayload, MapObject, CameraViewport, BlackoutPayload, CameraMovePayload } from '@/types';
+import { MAP_W, MAP_H, createFogCanvas, paintHide, revealBox as revealBoxFog, loadFogFromBase64, animateReveal } from '@/lib/fog-engine';
+import { applyViewport, type Viewport } from '@/lib/viewport';
 import PrepScreen from './PrepScreen';
 
 export default function PlayerDisplay({ slug }: { slug: string }) {
@@ -14,14 +14,45 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const vpRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
   const rafRef = useRef<number>(0);
   const sessionRef = useRef<Session | null>(null);
+  const cameraRef = useRef<CameraViewport | null>(null);
+  const objectsRef = useRef<MapObject[]>([]);
+  const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [connected, setConnected] = useState(false);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
   const [sessionName, setSessionName] = useState('');
+  const [blackout, setBlackout] = useState<{ active: boolean; message?: string } | null>(null);
 
   // Initialize fog canvas
   useEffect(() => {
     fogCanvasRef.current = createFogCanvas();
+  }, []);
+
+  // Compute viewport from camera
+  const computeViewport = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const { width, height } = container.getBoundingClientRect();
+    const cam = cameraRef.current;
+    if (cam && !(cam.x === 0 && cam.y === 0 && cam.w === MAP_W && cam.h === MAP_H)) {
+      const scaleX = width / cam.w;
+      const scaleY = height / cam.h;
+      const scale = Math.min(scaleX, scaleY);
+      vpRef.current = {
+        x: width / 2 - (cam.x + cam.w / 2) * scale,
+        y: height / 2 - (cam.y + cam.h / 2) * scale,
+        scale,
+      };
+    } else {
+      const scaleX = width / MAP_W;
+      const scaleY = height / MAP_H;
+      const scale = Math.min(scaleX, scaleY);
+      vpRef.current = {
+        x: (width - MAP_W * scale) / 2,
+        y: (height - MAP_H * scale) / 2,
+        scale,
+      };
+    }
   }, []);
 
   // Handle resize
@@ -33,12 +64,12 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       const { width, height } = container.getBoundingClientRect();
       canvas.width = width;
       canvas.height = height;
-      vpRef.current = fitToContainer(MAP_W, MAP_H, width, height);
+      computeViewport();
     };
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  }, [computeViewport]);
 
   // Render loop
   const render = useCallback(() => {
@@ -49,7 +80,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     if (!ctx) return;
     const W = canvas.width, H = canvas.height;
     const vp = vpRef.current;
-    const session = sessionRef.current;
 
     ctx.clearRect(0, 0, W, H);
     ctx.save();
@@ -62,17 +92,14 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       drawDefaultMap(ctx);
     }
 
-    // Draw tokens
-    if (session) {
-      session.tokens.forEach(t => {
-        ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = 8;
-        ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(t.x, t.y, 16, 0, Math.PI * 2); ctx.fill();
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = 'rgba(255,220,140,.4)'; ctx.lineWidth = 1.5; ctx.stroke();
-        ctx.font = '13px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(t.emoji, t.x, t.y);
-      });
-    }
+    // Draw map objects sorted by zIndex
+    const sorted = [...objectsRef.current].sort((a, b) => a.zIndex - b.zIndex);
+    sorted.forEach((obj) => {
+      if (!obj.visible) return;
+      const img = objectImagesRef.current.get(obj.id);
+      if (img) ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
+    });
+
     ctx.restore();
 
     // Draw fog at full opacity
@@ -90,6 +117,17 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     rafRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(rafRef.current);
   }, [render]);
+
+  // Helper to preload object images
+  const loadObjectImages = useCallback((objs: MapObject[]) => {
+    objectsRef.current = objs;
+    objs.forEach((obj) => {
+      if (objectImagesRef.current.has(obj.id)) return;
+      const img = new Image();
+      img.onload = () => { objectImagesRef.current.set(obj.id, img); };
+      img.src = obj.src;
+    });
+  }, []);
 
   // SSE connection
   useEffect(() => {
@@ -133,13 +171,26 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
             img.onload = () => { mapImageRef.current = img; };
             img.src = p.session.map_url;
           }
+          // Load objects from full state
+          if (p.objects) loadObjectImages(p.objects);
+          // Set camera
+          if (p.camera) {
+            cameraRef.current = p.camera;
+            computeViewport();
+          }
+          // Set blackout
+          const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
+          if (bl) setBlackout(bl);
           break;
         }
         case 'fog:paint': {
           const p = event.payload as FogPaintPayload;
           if (fogCtx) {
-            if (p.mode === 'reveal') paintReveal(fogCtx, p.x, p.y, p.radius);
-            else paintHide(fogCtx, p.x, p.y, p.radius);
+            if (p.mode === 'reveal') {
+              animateReveal(fogCtx, p.x, p.y, p.radius);
+            } else {
+              paintHide(fogCtx, p.x, p.y, p.radius);
+            }
           }
           break;
         }
@@ -218,6 +269,17 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           if (p.message) setPrepMessage(p.message);
           break;
         }
+        case 'camera:move': {
+          const p = event.payload as CameraMovePayload;
+          cameraRef.current = p;
+          computeViewport();
+          break;
+        }
+        case 'session:blackout': {
+          const p = event.payload as BlackoutPayload;
+          setBlackout(p.active ? p : null);
+          break;
+        }
         case 'ping': {
           // TODO: render ping animation
           break;
@@ -230,10 +292,22 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       clearTimeout(reconnectTimer);
       eventSource?.close();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   if (prepMode) {
     return <PrepScreen message={prepMessage} />;
+  }
+
+  // Blackout screen
+  if (blackout?.active) {
+    return (
+      <div className="fixed inset-0 bg-black flex items-center justify-center">
+        <div style={{ fontFamily: 'Cinzel, serif', fontSize: '1.2rem', color: 'rgba(200,150,62,.4)', letterSpacing: '.2em', textAlign: 'center' }}>
+          {blackout.message || 'Please wait…'}
+        </div>
+      </div>
+    );
   }
 
   return (
