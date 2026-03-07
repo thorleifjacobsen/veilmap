@@ -72,7 +72,7 @@ export default function Toolbar({
               key={b.radius}
               className="flex items-center justify-center cursor-pointer"
               onClick={() => onBrushChange(b.radius)}
-              title={`Brush ${b.key} (Key ${b.key})`}
+              title={`Brush size ${b.key} (Key: ${b.key})`}
             >
               <div
                 className="flex-shrink-0 rounded-full transition-all"

@@ -30,7 +30,6 @@ interface RightPanelProps {
   onObjectUpdate: (id: string, updates: Partial<MapObject>) => void;
   onObjectDelete: (id: string) => void;
   onObjectReorder: (id: string, direction: 'up' | 'down') => void;
-  onTokenUpload?: (file: File) => void;
 }
 
 export default function RightPanel({

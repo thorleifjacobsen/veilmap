@@ -38,10 +38,10 @@ The GM controls one browser window; a second URL on the projector shows players 
 ### Map Objects
 - Upload multiple images (PNG, JPG, WebP, GIF) as layered objects
 - Photoshop-style layer panel with z-index ordering
-- Per-object: rename (double-click), visibility toggle, lock position, reorder, delete
-- Select objects on canvas with transform handles — move, scale from corners
-- Grid snapping: center-snap objects to grid (right-click grid → Snap Objects to Grid)
-- Draw Grid Size: draw a rectangle matching a known grid cell to calibrate grid
+- Per-object: rename (double-click), visibility toggle (GM), right-click context menu for lock/reorder/delete
+- Select objects on canvas with transform handles — move, scale from corners (12px handles)
+- Grid snapping: center-snap objects to grid cells (right-click grid → Snap Objects to Grid)
+- Draw Grid Size: draw a rectangle matching a known grid cell to calibrate grid (shows green preview with px size)
 - GIF support for animated elements (water, fire, etc.)
 - Objects synced to player display in real-time via SSE
 
@@ -50,7 +50,7 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Click inside to drag, click corners to resize, click outside to draw new
 - Solid cyan border with corner handles — distinct from room boxes
 - Player display shows exactly what's inside the camera at 100% screen
-- Black letterboxing when camera aspect ratio doesn't match screen
+- Strict clipping: only camera area content is shown, black bars everywhere else
 - Area outside camera dimmed in GM view
 
 ### Polygon Rooms (Meta Boxes)
@@ -63,21 +63,21 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Reveal All / Clear buttons in panel
 
 ### Tokens (GM only)
-- 10-emoji palette with colored rings — quick placement
-- Upload custom token images (added as small map objects)
+- Emoji palette with colored rings — quick placement on map
 - Click to place, drag to move, right-click to delete
 - Visible only in GM view — not projected to players
 
 ### Player Display
 - Fullscreen, no UI chrome
 - Shows exactly what's inside the GM's camera viewport
-- Black letterboxing for non-matching aspect ratios
+- Strict camera clipping with black bars for non-matching areas
 - Map objects rendered with z-index ordering
 - Fog at full opacity
 - Vignette overlay for atmosphere
 - Blackout mode (`X` key) — instant black screen with custom message
 - Prep mode with animated runes overlay
 - SSE connection with auto-reconnect on visibility change (tab focus)
+- Right-click disabled
 
 ### Measurement
 - Ruler tool (`M` key)
@@ -100,6 +100,8 @@ The GM controls one browser window; a second URL on the projector shows players 
 - Sessions and data are owner-gated
 
 ## Keyboard Shortcuts
+
+Shortcuts shown as tooltips on hover in the toolbar.
 
 | Key | Action |
 |-----|--------|

@@ -1925,8 +1925,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   // ── Render ──
 
+  /** Prevent browser context menu everywhere except on canvas elements (which have custom context menus) */
+  const handleGlobalContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!(e.target instanceof HTMLCanvasElement)) e.preventDefault();
+  }, []);
+
   return (
-    <div className="flex h-full flex-col select-none" style={{ background: '#07060c', fontFamily: "'Crimson Pro',Georgia,serif", color: '#d4c4a0' }} onContextMenu={(e) => { /* Allow canvas right-click for context menu; prevent elsewhere */ if (!(e.target instanceof HTMLCanvasElement)) e.preventDefault(); }}>
+    <div className="flex h-full flex-col select-none" style={{ background: '#07060c', fontFamily: "'Crimson Pro',Georgia,serif", color: '#d4c4a0' }} onContextMenu={handleGlobalContextMenu}>
       {/* Header */}
       <header
         className="z-50 flex flex-shrink-0 items-center justify-between px-3 py-[7px]"
@@ -2050,7 +2055,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           onObjectUpdate={handleObjectUpdate}
           onObjectDelete={handleObjectDelete}
           onObjectReorder={handleObjectReorder}
-          onTokenUpload={handleTokenUpload}
         />
       </div>
 
