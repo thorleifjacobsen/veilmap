@@ -12,8 +12,9 @@ export function createFogCanvas(): HTMLCanvasElement {
   // Base fog color — dark with slight blue tint
   ctx.fillStyle = '#1a1a2e';
   ctx.fillRect(0, 0, MAP_W, MAP_H);
-  // Add visible fog texture — subtle swirl pattern
-  for (let i = 0; i < 2400; i++) {
+  // Add visible fog texture — subtle swirl pattern (density scales with canvas size)
+  const textureDots = Math.round(MAP_W * MAP_H / 14400);
+  for (let i = 0; i < textureDots; i++) {
     const x = Math.random() * MAP_W;
     const y = Math.random() * MAP_H;
     const r = Math.random() * 80 + 20;
