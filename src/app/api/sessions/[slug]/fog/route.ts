@@ -6,11 +6,11 @@ import { broadcast, setFogState } from '@/lib/sse';
 // PUT /api/sessions/[slug]/fog — save fog snapshot and broadcast
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessionRow = await db`
     SELECT s.id, s.owner_id, u.is_pro
@@ -41,11 +41,11 @@ export async function PUT(
 // POST /api/sessions/[slug]/fog — paint operations (throttled by client)
 export async function POST(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });

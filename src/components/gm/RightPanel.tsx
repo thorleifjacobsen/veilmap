@@ -40,7 +40,6 @@ interface RightPanelProps {
 
 export default function RightPanel({
   boxes,
-  tokens: _tokens,
   selectedBoxId,
   onBoxClick,
   onRevealAll,

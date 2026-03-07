@@ -6,9 +6,9 @@ import type { SSEEvent } from '@/types';
 // GET /api/sessions/[slug]/events — SSE endpoint for player display
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
-  const { slug } = params;
+  const { slug } = await params;
 
   // Verify session exists
   const sessions = await db`

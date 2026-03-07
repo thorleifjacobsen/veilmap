@@ -17,11 +17,9 @@ import {
   paintHide,
   revealBox as revealBoxFog,
   fogToBase64,
-  loadFogFromBase64,
 } from '@/lib/fog-engine';
 import {
   screenToMap,
-  mapToScreen,
   zoomAt,
   fitToContainer,
   applyViewport,
@@ -145,14 +143,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
 
   // ── Notification ──
-  const notifTimer = useRef<ReturnType<typeof setTimeout>>();
+  const notifTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const showNotif = useCallback((msg: string) => {
     setNotification(msg);
     clearTimeout(notifTimer.current);
     notifTimer.current = setTimeout(() => setNotification(''), 2600);
   }, []);
 
-  const hintTimer = useRef<ReturnType<typeof setTimeout>>();
+  const hintTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const showHint = useCallback((msg: string) => {
     setHint(msg);
     clearTimeout(hintTimer.current);
@@ -1159,8 +1157,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     const data: SessionExport = {
       version: 1,
       name: sessionName,
-      boxes: boxesRef.current.map(({ id: _id, session_id: _sid, ...rest }) => rest),
-      tokens: tokensRef.current.map(({ id: _id, session_id: _sid, ...rest }) => rest),
+      boxes: boxesRef.current.map(({ id: _, session_id: _s, ...rest }) => { void _; void _s; return rest; }),
+      tokens: tokensRef.current.map(({ id: _, session_id: _s, ...rest }) => { void _; void _s; return rest; }),
       settings: {
         gm_fog_opacity: gmFogOpacityRef.current,
         grid_size: gridSizeRef.current,

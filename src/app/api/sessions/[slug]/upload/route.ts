@@ -11,11 +11,11 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || 'public/uploads';
 // POST /api/sessions/[slug]/upload — upload map image (pro only)
 export async function POST(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { slug } = params;
+  const { slug } = await params;
 
   // Check session ownership and pro status
   const rows = await db`

@@ -7,11 +7,11 @@ import { v4 as uuidv4 } from 'uuid';
 // POST /api/sessions/[slug]/tokens — create a token
 export async function POST(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -40,11 +40,11 @@ export async function POST(
 // PUT /api/sessions/[slug]/tokens — update token position (tokenId in body)
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length || sessionRow[0].owner_id !== session.user.id) {
@@ -62,11 +62,11 @@ export async function PUT(
 // DELETE /api/sessions/[slug]/tokens — delete token (tokenId in body)
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { slug: string } }
+  { params }: { params: Promise<{ slug: string }> }
 ) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { slug } = params;
+  const { slug } = await params;
 
   const sessionRow = await db`SELECT id, owner_id FROM sessions WHERE slug = ${slug}`;
   if (!sessionRow.length || sessionRow[0].owner_id !== session.user.id) {

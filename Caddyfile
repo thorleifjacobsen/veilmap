@@ -1,0 +1,8 @@
+# Caddyfile — reverse proxy for VeilMap
+# For IP-only (no HTTPS), use :80
+# For a domain, replace :80 with your domain (e.g. veilmap.app)
+# Caddy will automatically provision HTTPS when using a domain.
+
+:80 {
+    reverse_proxy localhost:3000
+}
