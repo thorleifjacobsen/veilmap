@@ -17,6 +17,7 @@ import {
   paintHide,
   revealAllFog,
   revealBox as revealBoxFog,
+  revealGridCell,
   fogToBase64,
   loadFogFromBase64,
 } from '@/lib/fog-engine';
@@ -38,7 +39,7 @@ import ContextMenu, { type ContextMenuState } from './ContextMenu';
 
 // ── Types ──
 
-type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
+type ToolName = 'reveal' | 'hide' | 'gridReveal' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
 
 interface Ping { x: number; y: number; born: number }
 interface MeasureState { sx: number; sy: number; mx: number; my: number }
@@ -52,10 +53,11 @@ const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a
 const MIN_OBJECT_SIZE = 20; // px — minimum object width/height when resizing
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
   box: 'Click to place polygon vertices (Shift=snap), click near first to close',
-  select: 'Click a box to select/edit',
+  select: 'Click to select · Drag to resize · Hold Shift for free scale',
   measure: 'Drag to measure distance in feet & squares',
   ping: 'Click to ping a location on player display',
   camera: 'Drag to set camera viewport for player display',
+  gridReveal: 'Click or drag to reveal fog one grid cell at a time',
 };
 
 // ── Helpers ──
@@ -175,6 +177,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const objectResizeRef = useRef<{ objId: string; corner: string; startX: number; startY: number; origObj: MapObject } | null>(null);
   const snapToGridRef = useRef(false);
   const gridDrawStartRef = useRef<{ x: number; y: number } | null>(null);
+  const gridRevealCellsRef = useRef<Set<string>>(new Set());
 
   // Keep refs in sync
   useEffect(() => { toolRef.current = tool; }, [tool]);
@@ -398,6 +401,34 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.arc(p.x, p.y, r * 0.4, 0, Math.PI * 2);
       ctx.stroke();
     });
+
+    // Brush cursor (reveal/hide tool — show radius circle)
+    if (toolRef.current === 'reveal' || toolRef.current === 'hide') {
+      const mp = mousePosRef.current;
+      const r = brushRadiusRef.current;
+      ctx.strokeStyle = 'rgba(200,150,62,.5)';
+      ctx.lineWidth = 1.5 / vp.scale;
+      ctx.setLineDash([6 / vp.scale, 4 / vp.scale]);
+      ctx.beginPath();
+      ctx.arc(mp.mx, mp.my, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Grid reveal cursor (highlight hovered grid cell)
+    if (toolRef.current === 'gridReveal') {
+      const mp = mousePosRef.current;
+      const gs = gridSizeRef.current;
+      const cellX = Math.floor(mp.mx / gs) * gs;
+      const cellY = Math.floor(mp.my / gs) * gs;
+      ctx.strokeStyle = 'rgba(200,150,62,.6)';
+      ctx.lineWidth = 2 / vp.scale;
+      ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
+      ctx.strokeRect(cellX, cellY, gs, gs);
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(200,150,62,.08)';
+      ctx.fillRect(cellX, cellY, gs, gs);
+    }
 
     ctx.restore();
 
@@ -762,6 +793,25 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     [composeFogGM, sendFogPaint, doRevealBox],
   );
 
+  const paintGridRevealCell = useCallback(
+    (mx: number, my: number) => {
+      const fogCanvas = fogCanvasRef.current;
+      if (!fogCanvas) return;
+      const gs = gridSizeRef.current;
+      const cellX = Math.floor(mx / gs) * gs;
+      const cellY = Math.floor(my / gs) * gs;
+      const cellKey = `${cellX},${cellY}`;
+      if (gridRevealCellsRef.current.has(cellKey)) return;
+      gridRevealCellsRef.current.add(cellKey);
+      const ctx = fogCanvas.getContext('2d')!;
+      revealGridCell(ctx, cellX, cellY, gs);
+      composeFogGM();
+      // Send as a reveal stroke centered on the cell
+      sendFogPaint(cellX + gs / 2, cellY + gs / 2, gs / 2, 'reveal');
+    },
+    [composeFogGM, sendFogPaint],
+  );
+
   const resetFog = useCallback(() => {
     pushUndo();
     const fogCanvas = fogCanvasRef.current;
@@ -1043,7 +1093,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       const keyMap: Record<string, ToolName> = {
-        r: 'reveal', h: 'hide', b: 'box', s: 'select', p: 'ping', m: 'measure', c: 'camera',
+        r: 'reveal', h: 'hide', v: 'gridReveal', b: 'box', s: 'select', p: 'ping', m: 'measure', c: 'camera',
       };
       const brushKeys: Record<string, number> = { '1': 15, '2': 36, '3': 70, '4': 130 };
       const k = e.key.toLowerCase();
@@ -1254,8 +1304,17 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         lastPaintPosRef.current = { x: mp.x, y: mp.y };
         paintFog(mp.x, mp.y, toolRef.current);
       }
+      if (toolRef.current === 'gridReveal') {
+        if (!paintUndoPushedRef.current) {
+          pushUndo();
+          paintUndoPushedRef.current = true;
+        }
+        paintingRef.current = true;
+        gridRevealCellsRef.current.clear();
+        paintGridRevealCell(mp.x, mp.y);
+      }
     },
-    [getCanvasPos, addPing, setTool, clickSelect, pushUndo, paintFog, drawTop, drawGridMode, finalizePolygon],
+    [getCanvasPos, addPing, setTool, clickSelect, pushUndo, paintFog, paintGridRevealCell, drawTop, drawGridMode, finalizePolygon],
   );
 
   const handleMouseMove = useCallback(
@@ -1316,10 +1375,36 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const orig = r.origObj;
         let nx = orig.x, ny = orig.y, nw = orig.w, nh = orig.h;
         const dx = mp.x - r.startX, dy = mp.y - r.startY;
-        if (r.corner.includes('r')) { nw = Math.max(MIN_OBJECT_SIZE, orig.w + dx); }
-        if (r.corner.includes('l')) { nx = orig.x + dx; nw = Math.max(MIN_OBJECT_SIZE, orig.w - dx); }
-        if (r.corner.includes('b')) { nh = Math.max(MIN_OBJECT_SIZE, orig.h + dy); }
-        if (r.corner.includes('t')) { ny = orig.y + dy; nh = Math.max(MIN_OBJECT_SIZE, orig.h - dy); }
+        const freeScale = shiftHeldRef.current;
+        if (freeScale) {
+          // Shift held: free scaling in any direction
+          if (r.corner.includes('r')) { nw = Math.max(MIN_OBJECT_SIZE, orig.w + dx); }
+          if (r.corner.includes('l')) { nx = orig.x + dx; nw = Math.max(MIN_OBJECT_SIZE, orig.w - dx); }
+          if (r.corner.includes('b')) { nh = Math.max(MIN_OBJECT_SIZE, orig.h + dy); }
+          if (r.corner.includes('t')) { ny = orig.y + dy; nh = Math.max(MIN_OBJECT_SIZE, orig.h - dy); }
+        } else {
+          // Default: aspect ratio locked — scale proportionally from dragged corner
+          const aspect = orig.w / orig.h;
+          // Use the axis with larger movement to determine scale
+          let scale: number;
+          if (r.corner === 'br') {
+            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w + dx) / orig.w, (orig.h + dy) / orig.h)));
+            nw = orig.w * scale; nh = orig.h * scale;
+          } else if (r.corner === 'bl') {
+            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w - dx) / orig.w, (orig.h + dy) / orig.h)));
+            nw = orig.w * scale; nh = orig.h * scale;
+            nx = orig.x + orig.w - nw;
+          } else if (r.corner === 'tr') {
+            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w + dx) / orig.w, (orig.h - dy) / orig.h)));
+            nw = orig.w * scale; nh = orig.h * scale;
+            ny = orig.y + orig.h - nh;
+          } else { // tl
+            scale = Math.max(MIN_OBJECT_SIZE / orig.w, Math.max(MIN_OBJECT_SIZE / orig.h, Math.max((orig.w - dx) / orig.w, (orig.h - dy) / orig.h)));
+            nw = orig.w * scale; nh = orig.h * scale;
+            nx = orig.x + orig.w - nw;
+            ny = orig.y + orig.h - nh;
+          }
+        }
         const updated = objectsRef.current.map(o =>
           o.id === r.objId ? { ...o, x: nx, y: ny, w: nw, h: nh } : o
         );
@@ -1361,6 +1446,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           paintFog(mp.x, mp.y, toolRef.current);
         }
         lastPaintPosRef.current = { x: mp.x, y: mp.y };
+        return;
+      }
+
+      if (paintingRef.current && toolRef.current === 'gridReveal') {
+        paintGridRevealCell(mp.x, mp.y);
         return;
       }
 
@@ -1408,7 +1498,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
 
-      if (['box', 'measure', 'select'].includes(toolRef.current) || gridDrawStartRef.current) {
+      if (['box', 'measure', 'select', 'reveal', 'hide', 'gridReveal'].includes(toolRef.current) || gridDrawStartRef.current) {
         drawTop();
       }
     },

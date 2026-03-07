@@ -123,6 +123,13 @@ export function revealBox(ctx: CanvasRenderingContext2D, box: { x: number; y: nu
   ctx.globalCompositeOperation = 'source-over';
 }
 
+export function revealGridCell(ctx: CanvasRenderingContext2D, cellX: number, cellY: number, gridSize: number) {
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = 'rgba(0,0,0,1)';
+  ctx.fillRect(cellX, cellY, gridSize, gridSize);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
 export function fogToBase64(fogCanvas: HTMLCanvasElement): Promise<string> {
   return new Promise(resolve => {
     fogCanvas.toBlob(blob => {

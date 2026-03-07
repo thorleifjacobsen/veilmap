@@ -1,6 +1,6 @@
 'use client';
 
-type ToolName = 'reveal' | 'hide' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
+type ToolName = 'reveal' | 'hide' | 'gridReveal' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
 
 const BRUSH_SIZES = [
   { radius: 15, dotSize: 8, key: '1' },
@@ -57,6 +57,13 @@ export default function Toolbar({
           kbd="H"
           active={activeTool === 'hide'}
           onClick={() => onToolChange('hide')}
+        />
+        <ToolBtn
+          icon={<GridRevealIcon />}
+          label="Grid Reveal"
+          kbd="V"
+          active={activeTool === 'gridReveal'}
+          onClick={() => onToolChange('gridReveal')}
         />
         <ToolBtn
           icon={<ResetIcon />}
@@ -306,6 +313,19 @@ function GridIcon() {
       <rect x="14" y="3" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
       <rect x="14" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
+function GridRevealIcon() {
+  return (
+    <svg {...svgProps}>
+      <rect x="3" y="3" width="8" height="8" rx="0.5" />
+      <rect x="13" y="3" width="8" height="8" rx="0.5" />
+      <rect x="3" y="13" width="8" height="8" rx="0.5" />
+      <rect x="13" y="13" width="8" height="8" rx="0.5" />
+      <circle cx="17" cy="17" r="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M14 17s1.2-2 3-2 3 2 3 2-1.2 2-3 2-3-2-3-2z" fill="none" stroke="currentColor" strokeWidth="1" />
     </svg>
   );
 }
