@@ -1037,7 +1037,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           const dx = mp.x - lastPos.x;
           const dy = mp.y - lastPos.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const step = brushRadiusRef.current * 0.3;
+          const INTERPOLATION_STEP_FACTOR = 0.3; // fraction of brush radius used as step distance
+          const step = brushRadiusRef.current * INTERPOLATION_STEP_FACTOR;
           if (dist > step) {
             const steps = Math.ceil(dist / step);
             for (let i = 1; i <= steps; i++) {
@@ -1515,7 +1516,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             </span>
           )}
           <HeaderBtn onClick={handleResetView}>⌂ Fit</HeaderBtn>
-          <HeaderBtn onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/play/${slug}`); showNotif('Player URL copied!'); }}>📺 Player</HeaderBtn>
+          <HeaderBtn onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/play/${slug}`).then(() => showNotif('Player URL copied!')).catch(() => showNotif('Copy failed — check clipboard permissions')); }}>📺 Player</HeaderBtn>
           <HeaderBtn onClick={() => setSettingsOpen(true)}>⚙</HeaderBtn>
           <HeaderBtn onClick={undo}>↩ Undo</HeaderBtn>
         </div>

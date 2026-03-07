@@ -35,9 +35,11 @@ export function animateReveal(
   radius: number,
   onFrame?: () => void,
 ) {
-  const duration = 300;
+  const ANIMATION_DURATION_MS = 300;
+  const ANIMATION_STEPS = 6; // number of concentric gradient passes per frame
+  const duration = ANIMATION_DURATION_MS;
   const start = performance.now();
-  const steps = 6;
+  const steps = ANIMATION_STEPS;
 
   function frame(now: number) {
     const elapsed = now - start;
