@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --gold: #c8963e;
+  --gold-l: #f0c060;
+  --ember: #e05c2a;
+  --dark: #07060c;
+  --panel: #100f18;
+  --panel2: #0c0b13;
+  --border: rgba(200, 150, 62, 0.2);
+  --borderh: rgba(200, 150, 62, 0.45);
+  --text: #d4c4a0;
+  --dim: rgba(212, 196, 160, 0.4);
+  --prep: #1a0a2a;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;900&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--dark);
+  font-family: 'Crimson Pro', Georgia, serif;
+  color: var(--text);
+  user-select: none;
+}

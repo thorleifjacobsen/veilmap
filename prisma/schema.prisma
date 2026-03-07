@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BoxType {
+  autoReveal
+  trigger
+  hazard
+  note
+  hidden
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
+  password_hash String
+  is_pro        Boolean   @default(false)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  sessions      Session[]
+  assets        AssetLibrary[]
+
+  @@map("users")
+}
+
+model Session {
+  id             String   @id @default(uuid()) @db.Uuid
+  slug           String   @unique
+  owner_id       String   @db.Uuid
+  owner          User     @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  name           String   @default("New Session")
+  map_url        String?
+  fog_snapshot   Bytes?
+  prep_mode      Boolean  @default(false)
+  prep_message   String   @default("Preparing next scene…")
+  gm_fog_opacity Float    @default(0.5) @db.Real
+  grid_size      Int      @default(32)
+  show_grid      Boolean  @default(false)
+  grid_color     String   @default("#c8963e")
+  grid_opacity   Float    @default(0.25) @db.Real
+  camera_x       Float?   @db.Real
+  camera_y       Float?   @db.Real
+  camera_w       Float?   @db.Real
+  camera_h       Float?   @db.Real
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime @default(now()) @db.Timestamptz(6)
+  boxes          Box[]
+  map_objects    MapObject[]
+
+  @@index([owner_id], map: "idx_sessions_owner")
+  @@index([slug], map: "idx_sessions_slug")
+  @@map("sessions")
+}
+
+model Box {
+  id         String   @id @default(uuid()) @db.Uuid
+  session_id String   @db.Uuid
+  session    Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  name       String   @default("Room")
+  type       BoxType  @default(autoReveal)
+  x          Float    @db.Real
+  y          Float    @db.Real
+  w          Float    @db.Real
+  h          Float    @db.Real
+  color      String   @default("#c8963e")
+  notes      String   @default("")
+  revealed   Boolean  @default(false)
+  sort_order Int      @default(0)
+  points     Json?   @default("[]")
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([session_id], map: "idx_boxes_session")
+  @@map("boxes")
+}
+
+model MapObject {
+  id              String   @id @default(uuid()) @db.Uuid
+  session_id      String   @db.Uuid
+  session         Session  @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  name            String   @default("Object")
+  src             String
+  x               Float    @db.Real
+  y               Float    @db.Real
+  w               Float    @db.Real
+  h               Float    @db.Real
+  rotation        Float    @default(0) @db.Real
+  z_index         Int      @default(0)
+  visible         Boolean  @default(true)
+  player_visible  Boolean  @default(false)
+  locked          Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([session_id], map: "idx_map_objects_session")
+  @@map("map_objects")
+}
+
+model AssetLibrary {
+  id         String   @id @default(uuid()) @db.Uuid
+  owner_id   String?  @db.Uuid
+  owner      User?    @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  name       String
+  url        String
+  category   String   @default("object")
+  is_global  Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([owner_id], map: "idx_asset_library_owner")
+  @@map("asset_library")
+}
