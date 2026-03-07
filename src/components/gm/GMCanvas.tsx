@@ -1555,10 +1555,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       if (res.ok) {
         const assets = await res.json();
         setLibraryAssets(assets);
+      } else {
+        showNotif('Failed to load library');
       }
-    } catch { /* ignore */ }
+    } catch {
+      showNotif('Failed to load library');
+    }
     setShowLibrary(true);
-  }, []);
+  }, [showNotif]);
 
   // Close grid context menu on click-away
   useEffect(() => {
@@ -1607,7 +1611,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         };
         img.src = url;
       } catch {
-        showNotif('Upload failed');
+        showNotif('Upload failed — check file size and type');
       }
     },
     [drawMap, showNotif, broadcastObjects],
