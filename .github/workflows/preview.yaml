@@ -81,6 +81,7 @@ jobs:
             grep -q "^PORT=" $DIR/.env || echo "PORT=$PORT" >> $DIR/.env
             sed -i "s|^NEXT_PUBLIC_BASE_URL=.*|NEXT_PUBLIC_BASE_URL=https://pr-$PR.veilmap.app|" $DIR/.env
             # sed -i 's|\(DATABASE_URL=.*/\)veilmap\(["'"'"']\?\)$|\1veilmap_dev\2|' $DIR/.env
+            sed -i "s|^UPLOAD_DIR=.*|UPLOAD_DIR=/home/veilmap/app/public/uploads|" $DIR/.env
 
             grep -q "^EMAIL_OVERRIDE_TO=" $DIR/.env && \
               sed -i "s/^EMAIL_OVERRIDE_TO=.*/EMAIL_OVERRIDE_TO=override@veilmap.app/" $DIR/.env || \
