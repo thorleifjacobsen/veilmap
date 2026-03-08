@@ -4,11 +4,13 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { Session, SSEEvent, FogPaintPayload, FogSnapshotPayload, FullStatePayload, MapObject, CameraViewport, BlackoutPayload, CameraMovePayload } from '@/types';
 import { MAP_W, MAP_H, createFogCanvas, paintHide, revealBox as revealBoxFog, loadFogFromBase64, animateReveal } from '@/lib/fog-engine';
 import { applyViewport, hexToRgba, type Viewport } from '@/lib/viewport';
+import { renderAnimatedFog } from '@/lib/animated-fog';
 import PrepScreen from './PrepScreen';
 
 export default function PlayerDisplay({ slug }: { slug: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasBgRef = useRef<HTMLCanvasElement>(null);
+  const canvasFogRef = useRef<HTMLCanvasElement>(null);
   const fogCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mapImageRef = useRef<HTMLImageElement | null>(null);
   const vpRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
@@ -19,11 +21,15 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const pingsRef = useRef<Array<{ x: number; y: number; born: number }>>([]);
   const gridRef = useRef<{ show: boolean; size: number; color: string; opacity: number }>({ show: false, size: 32, color: '#c8963e', opacity: 0.25 });
+  const fogStyleRef = useRef<'solid' | 'animated'>('solid');
   const [connected, setConnected] = useState(false);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
   const [sessionName, setSessionName] = useState('');
   const [blackout, setBlackout] = useState<{ active: boolean; message?: string } | null>(null);
+  const [playerObjects, setPlayerObjects] = useState<MapObject[]>([]);
+  const [htmlVpTransform, setHtmlVpTransform] = useState('translate(0px,0px) scale(1)');
+  const [clipStyle, setClipStyle] = useState<React.CSSProperties>({});
 
   // Initialize fog canvas
   useEffect(() => {
@@ -61,11 +67,14 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   useEffect(() => {
     const handleResize = () => {
       const container = containerRef.current;
-      const canvas = canvasRef.current;
-      if (!container || !canvas) return;
+      const canvasBg = canvasBgRef.current;
+      const canvasFog = canvasFogRef.current;
+      if (!container || !canvasBg || !canvasFog) return;
       const { width, height } = container.getBoundingClientRect();
-      canvas.width = width;
-      canvas.height = height;
+      canvasBg.width = width;
+      canvasBg.height = height;
+      canvasFog.width = width;
+      canvasFog.height = height;
       computeViewport();
     };
     handleResize();
@@ -75,86 +84,97 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
 
   // Render loop
   const render = useCallback(() => {
-    const canvas = canvasRef.current;
+    const canvasBg = canvasBgRef.current;
+    const canvasFog = canvasFogRef.current;
     const fogCanvas = fogCanvasRef.current;
-    if (!canvas || !fogCanvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const W = canvas.width, H = canvas.height;
-
-    // Full black background (letterboxing)
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, W, H);
+    if (!canvasBg || !canvasFog || !fogCanvas) return;
+    const ctxBg = canvasBg.getContext('2d');
+    const ctxFog = canvasFog.getContext('2d');
+    if (!ctxBg || !ctxFog) return;
+    const W = canvasBg.width, H = canvasBg.height;
 
     const cam = cameraRef.current;
     const vp = vpRef.current;
-
-    // If we have a custom camera, clip to the camera area on screen
     const isCustomCam = cam && !(cam.x === 0 && cam.y === 0 && cam.w === MAP_W && cam.h === MAP_H);
+
+    // --- Background canvas: map image only ---
+    ctxBg.clearRect(0, 0, W, H);
+    ctxBg.fillStyle = '#000';
+    ctxBg.fillRect(0, 0, W, H);
 
     if (isCustomCam) {
       const screenX = vp.x + cam.x * vp.scale;
       const screenY = vp.y + cam.y * vp.scale;
       const screenW = cam.w * vp.scale;
       const screenH = cam.h * vp.scale;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(screenX, screenY, screenW, screenH);
-      ctx.clip();
+      ctxBg.save();
+      ctxBg.beginPath();
+      ctxBg.rect(screenX, screenY, screenW, screenH);
+      ctxBg.clip();
     }
 
-    ctx.save();
-    applyViewport(ctx, vp);
-
-    // Draw map (clean slate if no custom map)
+    ctxBg.save();
+    applyViewport(ctxBg, vp);
     if (mapImageRef.current) {
-      ctx.drawImage(mapImageRef.current, 0, 0, MAP_W, MAP_H);
+      ctxBg.drawImage(mapImageRef.current, 0, 0, MAP_W, MAP_H);
     } else {
-      ctx.fillStyle = '#0c0a08';
-      ctx.fillRect(0, 0, MAP_W, MAP_H);
+      ctxBg.fillStyle = '#0c0a08';
+      ctxBg.fillRect(0, 0, MAP_W, MAP_H);
+    }
+    ctxBg.restore();
+    if (isCustomCam) ctxBg.restore();
+
+    // --- Update HTML object layer transform and clip ---
+    setHtmlVpTransform(`translate(${vp.x}px,${vp.y}px) scale(${vp.scale})`);
+    setPlayerObjects([...objectsRef.current]);
+    if (isCustomCam) {
+      const screenX = vp.x + cam.x * vp.scale;
+      const screenY = vp.y + cam.y * vp.scale;
+      const screenW = cam.w * vp.scale;
+      const screenH = cam.h * vp.scale;
+      setClipStyle({
+        clipPath: `inset(${screenY}px ${W - screenX - screenW}px ${H - screenY - screenH}px ${screenX}px)`,
+      });
+    } else {
+      setClipStyle({});
     }
 
-    // Draw map objects sorted by zIndex (only player-visible ones)
-    const sorted = [...objectsRef.current].sort((a, b) => a.zIndex - b.zIndex);
-    sorted.forEach((obj) => {
-      if (!obj.visible || !obj.playerVisible) return;
-      const img = objectImagesRef.current.get(obj.id);
-      if (img) {
-        if (obj.rotation) {
-          ctx.save();
-          ctx.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
-          ctx.rotate((obj.rotation * Math.PI) / 180);
-          ctx.drawImage(img, -obj.w / 2, -obj.h / 2, obj.w, obj.h);
-          ctx.restore();
-        } else {
-          ctx.drawImage(img, obj.x, obj.y, obj.w, obj.h);
-        }
-      }
-    });
+    // --- Fog/overlay canvas: fog, grid, pings ---
+    ctxFog.clearRect(0, 0, W, H);
 
-    ctx.restore();
+    if (isCustomCam) {
+      const screenX = vp.x + cam.x * vp.scale;
+      const screenY = vp.y + cam.y * vp.scale;
+      const screenW = cam.w * vp.scale;
+      const screenH = cam.h * vp.scale;
+      ctxFog.save();
+      ctxFog.beginPath();
+      ctxFog.rect(screenX, screenY, screenW, screenH);
+      ctxFog.clip();
+    }
 
-    // Draw fog at full opacity (also within clip)
-    ctx.save();
-    applyViewport(ctx, vp);
-    ctx.globalAlpha = 1.0;
-    ctx.drawImage(fogCanvas, 0, 0);
-    ctx.globalAlpha = 1;
+    ctxFog.save();
+    applyViewport(ctxFog, vp);
+    ctxFog.globalAlpha = 1.0;
+    ctxFog.drawImage(fogCanvas, 0, 0);
+    // Animated fog overlay
+    if (fogStyleRef.current === 'animated') {
+      renderAnimatedFog(ctxFog, fogCanvas, Date.now() / 1000, MAP_W, MAP_H);
+    }
+    ctxFog.globalAlpha = 1;
 
     // Draw grid above fog so it's always visible
     if (gridRef.current.show && gridRef.current.size > 0) {
       const gs = gridRef.current.size;
       const gc = gridRef.current.color || '#c8963e';
       const go = gridRef.current.opacity ?? 0.25;
-      ctx.strokeStyle = hexToRgba(gc, go);
-      ctx.lineWidth = 1;
+      ctxFog.strokeStyle = hexToRgba(gc, go);
+      ctxFog.lineWidth = 0.5 / vp.scale;
       for (let x = 0; x <= MAP_W; x += gs) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, MAP_H); ctx.stroke();
+        ctxFog.beginPath(); ctxFog.moveTo(x, 0); ctxFog.lineTo(x, MAP_H); ctxFog.stroke();
       }
       for (let y = 0; y <= MAP_H; y += gs) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(MAP_W, y); ctx.stroke();
+        ctxFog.beginPath(); ctxFog.moveTo(0, y); ctxFog.lineTo(MAP_W, y); ctxFog.stroke();
       }
     }
 
@@ -170,20 +190,16 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
         if (rt <= 0) continue;
         const r = rt * maxR;
         const alpha = Math.max(0, 1 - rt) * 0.7;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(200,150,62,${alpha})`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        ctxFog.beginPath();
+        ctxFog.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctxFog.strokeStyle = `rgba(200,150,62,${alpha})`;
+        ctxFog.lineWidth = 2;
+        ctxFog.stroke();
       }
     });
 
-    ctx.restore();
-
-    // Restore clip if applied
-    if (isCustomCam) {
-      ctx.restore();
-    }
+    ctxFog.restore();
+    if (isCustomCam) ctxFog.restore();
 
     rafRef.current = requestAnimationFrame(render);
   }, []);
@@ -272,6 +288,10 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           // Set blackout
           const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
           if (bl) setBlackout(bl);
+          // Set fog style
+          if (p.session.fog_style) {
+            fogStyleRef.current = p.session.fog_style as 'solid' | 'animated';
+          }
           break;
         }
         case 'fog:paint': {
@@ -366,6 +386,11 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           loadObjectImages(p.objects);
           break;
         }
+        case 'fog:style': {
+          const p = event.payload as { style: string };
+          fogStyleRef.current = (p.style === 'animated') ? 'animated' : 'solid';
+          break;
+        }
       }
     }
 
@@ -395,7 +420,52 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
 
   return (
     <div ref={containerRef} className="fixed inset-0 bg-black" onContextMenu={(e) => e.preventDefault()}>
-      <canvas ref={canvasRef} className="w-full h-full block" />
+      {/* Background canvas — map image only */}
+      <canvas ref={canvasBgRef} className="absolute inset-0 w-full h-full block" style={{ zIndex: 1 }} />
+      {/* HTML object layer — GIFs animate naturally */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          zIndex: 2,
+          ...clipStyle,
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            transformOrigin: '0 0',
+            transform: htmlVpTransform,
+            width: MAP_W,
+            height: MAP_H,
+            overflow: 'hidden',
+          }}
+        >
+          {[...playerObjects].sort((a, b) => a.zIndex - b.zIndex).map((obj) => {
+            if (!obj.visible || !obj.playerVisible) return null;
+            return (
+              <img
+                key={obj.id}
+                src={obj.src}
+                alt={obj.name}
+                draggable={false}
+                style={{
+                  position: 'absolute',
+                  left: obj.x,
+                  top: obj.y,
+                  width: obj.w,
+                  height: obj.h,
+                  transform: obj.rotation ? `rotate(${obj.rotation}deg)` : undefined,
+                  transformOrigin: 'center center',
+                  pointerEvents: 'none',
+                  userSelect: 'none',
+                }}
+              />
+            );
+          })}
+        </div>
+      </div>
+      {/* Fog/overlay canvas — fog, grid, pings */}
+      <canvas ref={canvasFogRef} className="absolute inset-0 w-full h-full block pointer-events-none" style={{ zIndex: 3 }} />
       {/* Blackout overlay */}
       {blackout?.active && (
         <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
@@ -407,13 +477,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       <div className="absolute inset-0 pointer-events-none" style={{
         background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.7) 100%)',
       }} />
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-3 py-1.5" style={{
-        background: 'rgba(0,0,0,.8)', borderBottom: '1px solid rgba(200,150,62,.1)',
-      }}>
-        <div style={{ fontFamily: 'Cinzel, serif', fontSize: '.75rem', color: 'rgba(200,150,62,.4)', letterSpacing: '.2em' }}>
-          VEILMAP — {sessionName.toUpperCase()}
-        </div>
-      </div>
       <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-1" style={{
         background: 'rgba(0,0,0,.65)', borderTop: '1px solid rgba(200,150,62,.07)',
       }}>

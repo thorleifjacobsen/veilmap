@@ -43,6 +43,7 @@ export async function GET(
       notes: b.notes,
       revealed: b.revealed,
       sort_order: b.sort_order,
+      points: (b.points as { x: number; y: number }[] | null) || [],
     })),
     objects: s.map_objects.map((o) => ({
       id: o.id,

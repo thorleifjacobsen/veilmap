@@ -13,6 +13,8 @@ interface SettingsModalProps {
   onPrepMessageChange: (v: string) => void;
   sessionName: string;
   onSessionNameChange: (v: string) => void;
+  fogStyle: 'solid' | 'animated';
+  onFogStyleChange: (v: 'solid' | 'animated') => void;
 }
 
 export default function SettingsModal({
@@ -26,6 +28,8 @@ export default function SettingsModal({
   onPrepMessageChange,
   sessionName,
   onSessionNameChange,
+  fogStyle,
+  onFogStyleChange,
 }: SettingsModalProps) {
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent) => {
@@ -93,6 +97,33 @@ export default function SettingsModal({
               display={`${gridSize}px`}
               onChange={onGridSizeChange}
             />
+          </SettingsSection>
+
+          <SettingsSection title="Fog Style">
+            <div className="flex items-center gap-2">
+              {(['solid', 'animated'] as const).map((style) => (
+                <button
+                  key={style}
+                  className="flex-1 rounded border px-3 py-1.5 text-[.62rem] tracking-[.06em] transition-all"
+                  style={{
+                    fontFamily: "'Cinzel',serif",
+                    borderColor: fogStyle === style ? '#c8963e' : 'rgba(200,150,62,.2)',
+                    background: fogStyle === style ? 'rgba(200,150,62,.15)' : 'transparent',
+                    color: fogStyle === style ? '#c8963e' : 'rgba(212,196,160,.4)',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => onFogStyleChange(style)}
+                >
+                  {style === 'solid' ? '▪ Solid' : '≈ Animated'}
+                </button>
+              ))}
+            </div>
+            <div
+              className="mt-1.5 text-[.52rem]"
+              style={{ fontFamily: "'Crimson Pro',serif", color: 'rgba(212,196,160,.3)' }}
+            >
+              Animated fog adds a slow-moving mist effect. Auto-disables on low performance.
+            </div>
           </SettingsSection>
 
           {/* Prep Mode section */}

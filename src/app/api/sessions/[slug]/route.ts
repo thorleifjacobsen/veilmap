@@ -96,6 +96,8 @@ export async function PATCH(
   if (body.show_grid !== undefined) updates.show_grid = body.show_grid;
   if (body.grid_color !== undefined) updates.grid_color = body.grid_color;
   if (body.grid_opacity !== undefined) updates.grid_opacity = body.grid_opacity;
+  if (body.measurement_unit !== undefined) updates.measurement_unit = body.measurement_unit;
+  if (body.fog_style !== undefined) updates.fog_style = body.fog_style;
   if (body.camera_x !== undefined) updates.camera_x = body.camera_x;
   if (body.camera_y !== undefined) updates.camera_y = body.camera_y;
   if (body.camera_w !== undefined) updates.camera_w = body.camera_w;

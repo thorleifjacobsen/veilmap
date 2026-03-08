@@ -50,6 +50,8 @@ export interface Session {
   show_grid: boolean;
   grid_color: string;
   grid_opacity: number;
+  measurement_unit: string;
+  fog_style: string;
   camera_x: number | null;
   camera_y: number | null;
   camera_w: number | null;
@@ -78,6 +80,7 @@ export type SSEEventType =
   | 'fog:snapshot'
   | 'fog:reset'
   | 'fog:revealall'
+  | 'fog:style'
   | 'box:reveal'
   | 'box:hide'
   | 'box:create'

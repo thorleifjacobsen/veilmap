@@ -165,5 +165,10 @@ export async function POST(
     broadcast(slug, { type: 'grid:update', payload: body.grid });
   }
 
+  // body.fog_style broadcasts fog style change to players
+  if (body.fog_style) {
+    broadcast(slug, { type: 'fog:style', payload: { style: body.fog_style } });
+  }
+
   return NextResponse.json({ ok: true });
 }
