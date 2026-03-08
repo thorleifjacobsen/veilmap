@@ -102,7 +102,7 @@ Write the Caddyfile (IP-only for now, no HTTPS yet):
 
 ```bash
 tee /etc/caddy/Caddyfile << 'EOF'
-:80 {
+veilmap.app {
     @ws {
         path /ws
         header Connection *Upgrade*
@@ -110,21 +110,13 @@ tee /etc/caddy/Caddyfile << 'EOF'
     }
     reverse_proxy @ws localhost:3000
     reverse_proxy localhost:3000
-
-    handle /uploads/* {
-        root * /var/www/veilmap
-        file_server
-    }
 }
 EOF
 ```
 
-Create the uploads folder and hand it to the veilmap user:
+Reload Caddy to apply the config:
 
 ```bash
-mkdir -p /var/www/veilmap/uploads
-chown -R veilmap:veilmap /var/www/veilmap
-
 systemctl enable caddy
 systemctl restart caddy
 ```
@@ -158,41 +150,52 @@ which node
 
 > Run as: **veilmap**
 
+Generate a SSH key for GitHub access:
+
 ```bash
-cd ~
-git clone https://github.com/YOUR_USERNAME/veilmap.git
-cd veilmap
-npm install
+ssh-keygen -t ed25519 -C "veilmap-deploy" -f ~/.ssh/id_github -N ""
+cat ~/.ssh/id_github.pub
 ```
 
-Generate a secret for NextAuth:
+Add the printed public key to the repository under **Settings → Deploy keys** (read-only access is sufficient).
+
+Then clone the app and install dependencies:
+
+```bash
+cd ~
+git clone https://github.com/thorleifjacobsen/veilmap.git
+cd veilmap
+```
+
+Copy the example environment file and edit it:
+
+```bash
+cp .env.example .env
+```
+
+Generate a secret for NextAuth and AUTH_SECRET.
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Copy the output, then create `.env.local`:
-
-```bash
-nano .env.local
-```
+Then fill in the generated secrets, database URL, and server IP in `.env`:
 
 ```env
 DATABASE_URL=postgresql://veilmap:CHANGE_THIS_PASSWORD@localhost:5432/veilmap
+SHADOW_DATABASE_URL=postgresql://veilmap:CHANGE_THIS_PASSWORD@localhost:5432/veilmap_shadow
 NEXTAUTH_SECRET=PASTE_GENERATED_SECRET_HERE
-NEXTAUTH_URL=http://YOUR_SERVER_IP
-NEXT_PUBLIC_WS_URL=ws://YOUR_SERVER_IP
-UPLOAD_DIR=/var/www/veilmap/uploads
+NEXTAUTH_URL=https://veilmapp.app
+UPLOAD_DIR=public/uploads
 MAX_UPLOAD_SIZE_MB=20
-NODE_ENV=production
+AUTH_SECRET=PASTE_GENERATED_SECRET_2_HERE
 ```
 
-Run the database migration:
+Run the database migration if fresh:
 
 ```bash
 npm run db:migrate
-# or manually:
-psql $DATABASE_URL < db/schema.sql
 ```
 
 ---
