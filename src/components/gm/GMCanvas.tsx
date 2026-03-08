@@ -1187,7 +1187,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const saved = localStorage.getItem(`veilmap-vp-${slug}`);
         if (saved) {
           const vp = JSON.parse(saved);
-          if (typeof vp.x === 'number' && typeof vp.y === 'number' && typeof vp.scale === 'number' && vp.scale > 0) {
+          if (
+            typeof vp.x === 'number' && typeof vp.y === 'number' && typeof vp.scale === 'number' &&
+            vp.scale >= 0.05 && vp.scale <= 20 &&
+            Math.abs(vp.x) < MAP_W * 10 && Math.abs(vp.y) < MAP_H * 10
+          ) {
             vpRef.current = { x: vp.x, y: vp.y, scale: vp.scale };
             restored = true;
           }
@@ -1223,6 +1227,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     return () => {
       window.removeEventListener('resize', onResize);
       if (fogSnapshotTimerRef.current) clearInterval(fogSnapshotTimerRef.current);
+      if (vpSaveTimerRef.current) clearTimeout(vpSaveTimerRef.current);
       sendFogSnapshot();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
