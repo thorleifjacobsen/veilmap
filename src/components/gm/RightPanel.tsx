@@ -74,10 +74,6 @@ function useCollapsedSections(slug: string) {
   return { collapsed, toggle };
 }
 
-// Ambient audio refs (module-level to persist across renders)
-const ambientAudio: { el: HTMLAudioElement | null; slotId: string | null } = { el: null, slotId: null };
-const effectAudioSet = new Set<HTMLAudioElement>();
-
 const PARTICLE_OPTIONS: { value: ParticleEffect; label: string; icon: string }[] = [
   { value: 'none', label: 'None', icon: '○' },
   { value: 'rain', label: 'Rain', icon: '🌧' },
@@ -112,6 +108,10 @@ export default function RightPanel({
   const [objectMenuPos, setObjectMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   const { collapsed, toggle } = useCollapsedSections(slug);
+
+  // ── Audio refs (instance-scoped to avoid conflicts between tabs/instances) ──
+  const ambientAudioRef = useRef<{ el: HTMLAudioElement | null; slotId: string | null }>({ el: null, slotId: null });
+  const effectAudioSetRef = useRef<Set<HTMLAudioElement>>(new Set());
 
   // ── Environment state ──
   const [env, setEnv] = useState<EnvironmentSettings>({
@@ -217,6 +217,7 @@ export default function RightPanel({
 
   // ── Soundboard: stop ambient (with optional fade) ──
   const stopAmbient = useCallback((fade: boolean = true) => {
+    const ambientAudio = ambientAudioRef.current;
     if (!ambientAudio.el) return;
     const audio = ambientAudio.el;
     ambientAudio.el = null;
@@ -247,8 +248,8 @@ export default function RightPanel({
     audio.loop = true;
     audio.volume = Math.min(1, slot.volume * vol);
     audio.play().catch(() => {});
-    ambientAudio.el = audio;
-    ambientAudio.slotId = slot.id;
+    ambientAudioRef.current.el = audio;
+    ambientAudioRef.current.slotId = slot.id;
     setPlayingAmbientId(slot.id);
     onWsSend('audio:play', { url: slot.fileUrl, volume: slot.volume * vol, loop: true });
   }, [stopAmbient, onWsSend]);
@@ -256,23 +257,24 @@ export default function RightPanel({
   const playEffect = useCallback((slot: SoundSlot, vol: number) => {
     const audio = new Audio(slot.fileUrl);
     audio.volume = Math.min(1, slot.volume * vol);
-    effectAudioSet.add(audio);
+    effectAudioSetRef.current.add(audio);
     audio.play().catch(() => {});
     setPlayingEffects(prev => new Set(prev).add(slot.id));
     audio.onended = () => {
-      effectAudioSet.delete(audio);
+      effectAudioSetRef.current.delete(audio);
       setPlayingEffects(prev => { const s = new Set(prev); s.delete(slot.id); return s; });
     };
     onWsSend('audio:play', { url: slot.fileUrl, volume: slot.volume * vol, loop: false });
   }, [onWsSend]);
 
   const stopEffect = useCallback((slot: SoundSlot) => {
-    for (const a of effectAudioSet) {
-      const aUrl = new URL(a.src).pathname;
-      if (aUrl === slot.fileUrl || a.src === window.location.origin + slot.fileUrl) {
+    for (const a of effectAudioSetRef.current) {
+      let aPath: string;
+      try { aPath = new URL(a.src).pathname; } catch { aPath = a.src; }
+      if (aPath === slot.fileUrl || a.src === window.location.origin + slot.fileUrl) {
         a.pause();
         a.currentTime = 0;
-        effectAudioSet.delete(a);
+        effectAudioSetRef.current.delete(a);
         break;
       }
     }
@@ -297,6 +299,7 @@ export default function RightPanel({
 
   // Update ambient volume when masterVolume changes
   useEffect(() => {
+    const ambientAudio = ambientAudioRef.current;
     if (ambientAudio.el) {
       const slot = slots.find(s => s?.id === ambientAudio.slotId);
       if (slot) ambientAudio.el.volume = Math.min(1, slot.volume * masterVolume);
@@ -381,6 +384,7 @@ export default function RightPanel({
       if (!slot) return prev;
       const newVol = Math.max(0, Math.min(1, slot.volume + delta));
       next[index] = { ...slot, volume: newVol };
+      const ambientAudio = ambientAudioRef.current;
       if (slot.type === 'ambient' && ambientAudio.el && ambientAudio.slotId === slot.id) {
         ambientAudio.el.volume = Math.min(1, newVol * masterVolume);
       }

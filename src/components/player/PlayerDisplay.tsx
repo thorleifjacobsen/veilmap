@@ -505,7 +505,7 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           audio.volume = Math.min(1, Math.max(0, p.volume ?? 1));
           audio.loop = !!p.loop;
           audio.play().catch(() => {});
-          if (!p.loop) audio.onended = () => audio.remove();
+          // No cleanup needed for one-shot audio — GC collects it after playback
         }
         break;
       }

@@ -86,6 +86,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 const MAX_UNDO = 50;
 const POLYGON_SNAP_DISTANCE = 8; // px — how close to first vertex to close a polygon
+const MIN_RECT_SIZE = 2; // px — minimum rectangle dimensions for fog rectangle tool
 const MIN_OBJECT_SIZE = 4; // px — minimum object width/height when resizing
 const ROTATION_HANDLE_OFFSET = 30; // px — distance from object top to rotation handle
 const ROTATION_HANDLE_RADIUS = 6; // px — visual radius of the rotation handle circle
@@ -2095,8 +2096,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const rectStart = rectDrawStartRef.current;
         const subTool = toolRef.current === 'reveal' ? revealSubToolRef.current : toolRef.current === 'hide' ? hideSubToolRef.current : null;
         if (rectStart && subTool === 'rectangle' && (toolRef.current === 'reveal' || toolRef.current === 'hide')) {
-          const { sx: sx2, sy: sy2 } = getCanvasPos(e);
-          const mp2 = screenToMap(sx2, sy2, vpRef.current);
+          const { sx: endSx, sy: endSy } = getCanvasPos(e);
+          const mp2 = screenToMap(endSx, endSy, vpRef.current);
           const fogCanvas = fogCanvasRef.current;
           if (fogCanvas) {
             const ctx = fogCanvas.getContext('2d')!;
@@ -2104,7 +2105,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             const ry = Math.min(rectStart.y, mp2.y);
             const rw = Math.abs(mp2.x - rectStart.x);
             const rh = Math.abs(mp2.y - rectStart.y);
-            if (rw > 2 && rh > 2) {
+            if (rw > MIN_RECT_SIZE && rh > MIN_RECT_SIZE) {
               if (toolRef.current === 'reveal') {
                 ctx.clearRect(rx, ry, rw, rh);
               } else {
