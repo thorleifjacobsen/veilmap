@@ -1229,8 +1229,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       // Synchronous base64 encoding for beforeunload
       const png = fc.toDataURL('image/png').split(',')[1];
       fogDirtyRef.current = false;
-      // Send via WS (synchronous queue) — server persists to DB
-      wsSendRef.current('fog:snapshot', { png });
+      // Use sendBeacon (POST) for reliable delivery during page unload
+      const blob = new Blob([JSON.stringify({ png })], { type: 'application/json' });
+      const sent = navigator.sendBeacon(`/api/sessions/${slug}/fog`, blob);
+      // Fallback to WS if sendBeacon fails (e.g. payload too large)
+      if (!sent) wsSendRef.current('fog:snapshot', { png });
     };
     window.addEventListener('beforeunload', onBeforeUnload);
 
