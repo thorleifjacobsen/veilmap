@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { auth } from '@/lib/auth';
-import { broadcast } from '@/lib/sse';
+import { broadcastPlayers } from '@/lib/ws-store';
 import { v4 as uuidv4 } from 'uuid';
 
 // POST /api/sessions/[slug]/boxes — create a box
@@ -45,7 +45,7 @@ export async function POST(
     points: (b.points as { x: number; y: number }[] | null) || [],
   };
 
-  broadcast(slug, { type: 'box:create', payload: box });
+  broadcastPlayers(slug, { type: 'box:create', payload: box });
   return NextResponse.json(box, { status: 201 });
 }
 
@@ -80,9 +80,9 @@ export async function PATCH(
   }
 
   // Broadcast reveal/hide specifically
-  if (updates.revealed === true) broadcast(slug, { type: 'box:reveal', payload: { boxId } });
-  else if (updates.revealed === false) broadcast(slug, { type: 'box:hide', payload: { boxId } });
-  else broadcast(slug, { type: 'box:update', payload: { boxId, ...dbUpdates } });
+  if (updates.revealed === true) broadcastPlayers(slug, { type: 'box:reveal', payload: { boxId } });
+  else if (updates.revealed === false) broadcastPlayers(slug, { type: 'box:hide', payload: { boxId } });
+  else broadcastPlayers(slug, { type: 'box:update', payload: { boxId, ...dbUpdates } });
 
   return NextResponse.json({ ok: true });
 }
@@ -105,6 +105,6 @@ export async function DELETE(
   if (!body.boxId) return NextResponse.json({ error: 'Missing boxId' }, { status: 400 });
 
   await db.box.deleteMany({ where: { id: body.boxId, session_id: sessionRow.id } });
-  broadcast(slug, { type: 'box:delete', payload: { boxId: body.boxId } });
+  broadcastPlayers(slug, { type: 'box:delete', payload: { boxId: body.boxId } });
   return NextResponse.json({ ok: true });
 }

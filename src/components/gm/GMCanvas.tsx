@@ -37,6 +37,7 @@ import BoxEditor from './BoxEditor';
 import SettingsModal from './SettingsModal';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
 import { renderAnimatedFogGM } from '@/lib/animated-fog';
+import { useSessionWS } from '@/hooks/useSessionWS';
 
 // ── Types ──
 
@@ -253,6 +254,17 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     if (msg) hintTimer.current = setTimeout(() => setHint(''), 5000);
   }, []);
 
+  // ── WebSocket connection (GM sends events, no incoming messages needed) ──
+  const { send: wsSend } = useSessionWS({
+    slug,
+    role: 'gm',
+    onMessage: () => {}, // GM only sends events via WS; state is managed locally
+  });
+
+  // Stable ref so callbacks don't recreate on every render
+  const wsSendRef = useRef(wsSend);
+  useEffect(() => { wsSendRef.current = wsSend; }, [wsSend]);
+
   // ── API helpers ──
 
   const fogStrokeBatchRef = useRef<Array<{ x: number; y: number; radius: number; mode: string }>>([]);
@@ -264,27 +276,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       fogThrottleRef.current = setTimeout(() => {
         fogThrottleRef.current = null;
         const strokes = fogStrokeBatchRef.current.splice(0);
-        if (strokes.length === 0) return;
-        fetch(`/api/sessions/${slug}/fog`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ strokes }),
-        }).catch(() => {});
-      }, 50);
+        for (const stroke of strokes) {
+          wsSendRef.current('fog:paint', stroke);
+        }
+      }, 16); // ~60fps cap
     },
-    [slug],
+    [],
   );
 
   const sendFogSnapshot = useCallback(async () => {
     const fc = fogCanvasRef.current;
     if (!fc) return;
     const png = await fogToBase64(fc);
-    fetch(`/api/sessions/${slug}/fog`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ png }),
-    }).catch(() => {});
-  }, [slug]);
+    // Send via WS — server persists to DB and broadcasts to players
+    wsSendRef.current('fog:snapshot', { png });
+  }, []);
 
   const apiBoxCreate = useCallback(
     (box: Box) => {
@@ -321,45 +327,29 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const apiPing = useCallback(
     (x: number, y: number) => {
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ping: { x, y } }),
-      }).catch(() => {});
+      wsSendRef.current('ping', { x, y });
     },
-    [slug],
+    [],
   );
 
   const broadcastCamera = useCallback(
     (cam: CameraViewport) => {
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ camera: cam }),
-      }).catch(() => {});
+      wsSendRef.current('camera:update', cam);
     },
-    [slug],
+    [],
   );
 
   const broadcastBlackout = useCallback(
     (active: boolean, message?: string) => {
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blackout: { active, message } }),
-      }).catch(() => {});
+      wsSendRef.current('session:blackout', { active, message });
     },
-    [slug],
+    [],
   );
 
   const handleShake = useCallback(() => {
-    fetch(`/api/sessions/${slug}/fog`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shake: { intensity: 'medium' } }),
-    }).catch(() => {});
+    wsSendRef.current('display:shake', { intensity: 'medium' });
     showNotif('⚡ Shake sent!');
-  }, [slug, showNotif]);
+  }, [showNotif]);
 
   // ── Draw pipeline ──
 
@@ -806,11 +796,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       drawMap();
       drawTop();
       // Broadcast restored objects
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ objects: entry.objectsBefore }),
-      }).catch(() => {});
+      wsSendRef.current('objects:update', { objects: entry.objectsBefore });
     }
 
     // Restore boxes state if present
@@ -965,14 +951,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     composeFogGM();
     redrawBoxes();
     showNotif('Fog reset');
-    // Broadcast reset event for immediate player update
-    fetch(`/api/sessions/${slug}/fog`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reset: true }),
-    }).catch(() => {});
+    // Send reset and snapshot via WS for immediate player update
+    wsSendRef.current('fog:reset', {});
     sendFogSnapshot();
-  }, [pushUndo, composeFogGM, redrawBoxes, showNotif, sendFogSnapshot, slug]);
+  }, [pushUndo, composeFogGM, redrawBoxes, showNotif, sendFogSnapshot]);
 
   const revealAll = useCallback(() => {
     pushUndo();
@@ -986,14 +968,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     composeFogGM();
     redrawBoxes();
     showNotif('All fog revealed');
-    // Broadcast revealall event for immediate player update
-    fetch(`/api/sessions/${slug}/fog`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ revealall: true }),
-    }).catch(() => {});
+    // Send revealall and snapshot via WS for immediate player update
+    wsSendRef.current('fog:revealall', {});
     sendFogSnapshot();
-  }, [pushUndo, composeFogGM, redrawBoxes, showNotif, sendFogSnapshot, slug]);
+  }, [pushUndo, composeFogGM, redrawBoxes, showNotif, sendFogSnapshot]);
 
   // ── Tool switching ──
 
@@ -1170,20 +1148,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     // Broadcast DB-stored camera on mount so player gets it immediately
     if (session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null) {
       const cam = { x: session.camera_x, y: session.camera_y, w: session.camera_w, h: session.camera_h };
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ camera: cam }),
-      }).catch(() => {});
+      wsSendRef.current('camera:update', cam);
     }
 
     // Broadcast DB-stored objects on mount so player gets them
     if (session.objects && session.objects.length > 0) {
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ objects: session.objects }),
-      }).catch(() => {});
+      wsSendRef.current('objects:update', { objects: session.objects });
     }
 
     showNotif('✦ Space+drag to pan · Scroll to zoom · Right-click for menu');
@@ -1242,13 +1212,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       body: JSON.stringify({ show_grid: showGrid, grid_size: gridSize, grid_color: gridColor, grid_opacity: gridOpacity }),
     }).catch(() => {});
     // Broadcast grid state to players
-    fetch(`/api/sessions/${slug}/fog`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grid: { show: showGrid, size: gridSize, color: gridColor, opacity: gridOpacity } }),
-    }).catch(() => {});
+    wsSendRef.current('grid:update', { show: showGrid, size: gridSize, color: gridColor, opacity: gridOpacity });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGrid, gridSize, gridColor, gridOpacity, slug]);
+  }, [showGrid, gridSize, gridColor, gridOpacity]);
 
   // ── Keyboard ──
 
@@ -1268,10 +1234,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     selectedObjectIdRef.current = newId;
     drawMap();
     drawTop();
-    fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+    wsSendRef.current('objects:update', { objects: updated });
     undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `duplicated ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
     showNotif(`Duplicated: ${obj.name}`);
-  }, [drawMap, drawTop, showNotif, slug]);
+  }, [drawMap, drawTop, showNotif]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1362,7 +1328,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             selectedObjectIdRef.current = null;
             drawMap();
             drawTop();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            wsSendRef.current('objects:update', { objects: updated });
             undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
             showNotif(`Deleted: ${obj.name}`);
           }
@@ -1385,7 +1351,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           setObjects(updated);
           drawMap();
           drawTop();
-          fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+          wsSendRef.current('objects:update', { objects: updated });
         }
       }
       if (e.key === '+' || e.key === '=') {
@@ -1797,11 +1763,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           }
           objectUndoBeforeRef.current = null;
         }
-        fetch(`/api/sessions/${slug}/fog`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ objects: objectsRef.current }),
-        }).catch(() => {});
+        wsSendRef.current('objects:update', { objects: objectsRef.current });
         return;
       }
       if (objectResizeRef.current) {
@@ -1820,11 +1782,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           }
           objectUndoBeforeRef.current = null;
         }
-        fetch(`/api/sessions/${slug}/fog`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ objects: objectsRef.current }),
-        }).catch(() => {});
+        wsSendRef.current('objects:update', { objects: objectsRef.current });
         return;
       }
       const { sx, sy } = getCanvasPos(e);
@@ -1839,17 +1797,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           setGridSize(newSize);
           gridSizeRef.current = newSize;
           showNotif(`Grid size set to ${newSize}px`);
-          // Persist grid_size to DB and broadcast to players
+          // Persist grid_size to DB
           fetch(`/api/sessions/${slug}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ grid_size: newSize }),
           }).catch(() => {});
-          fetch(`/api/sessions/${slug}/fog`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ grid: { show: showGridRef.current, size: newSize, color: gridColorRef.current, opacity: gridOpacityRef.current } }),
-          }).catch(() => {});
+          // Broadcast grid to players via WS
+          wsSendRef.current('grid:update', { show: showGridRef.current, size: newSize, color: gridColorRef.current, opacity: gridOpacityRef.current });
         }
         gridDrawStartRef.current = null;
         setDrawGridMode(false);
@@ -2029,7 +1984,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
               objectsRef.current = updated;
               setObjects(updated);
               drawMap();
-              fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+              wsSendRef.current('objects:update', { objects: updated });
             }
           }
           break;
@@ -2040,7 +1995,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             objectsRef.current = updated;
             setObjects(updated);
             drawMap();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            wsSendRef.current('objects:update', { objects: updated });
           }
           break;
         }
@@ -2051,7 +2006,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             objectsRef.current = updated;
             setObjects(updated);
             drawMap();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            wsSendRef.current('objects:update', { objects: updated });
           }
           break;
         }
@@ -2070,7 +2025,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                 objectsRef.current = sorted;
                 setObjects([...sorted]);
                 drawMap();
-                fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: sorted }) }).catch(() => {});
+                wsSendRef.current('objects:update', { objects: sorted });
               }
             }
           }
@@ -2082,7 +2037,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             objectsRef.current = updated;
             setObjects(updated);
             drawMap();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            wsSendRef.current('objects:update', { objects: updated });
           }
           break;
         case 'toggleGmVisible':
@@ -2091,7 +2046,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             objectsRef.current = updated;
             setObjects(updated);
             drawMap();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            wsSendRef.current('objects:update', { objects: updated });
           }
           break;
         case 'togglePlayerVisible':
@@ -2100,7 +2055,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             objectsRef.current = updated;
             setObjects(updated);
             drawMap();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            wsSendRef.current('objects:update', { objects: updated });
           }
           break;
         case 'deleteObject':
@@ -2114,14 +2069,14 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             selectedObjectIdRef.current = null;
             drawMap();
             drawTop();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            wsSendRef.current('objects:update', { objects: updated });
             undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
             showNotif(`Deleted: ${ctxObj.name}`);
           }
           break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, slug, duplicateObject],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, duplicateObject],
   );
 
   // ── Box editor callbacks ──
@@ -2182,13 +2137,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const broadcastObjects = useCallback(
     (objs: MapObject[]) => {
-      fetch(`/api/sessions/${slug}/fog`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ objects: objs }),
-      }).catch(() => {});
+      wsSendRef.current('objects:update', { objects: objs });
     },
-    [slug],
+    [],
   );
 
   const handleGridRightClick = useCallback((e: React.MouseEvent) => {
@@ -2798,12 +2749,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fog_style: v }),
           }).catch(() => {});
-          // Broadcast fog_style change to player displays
-          fetch(`/api/sessions/${slug}/fog`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fog_style: v }),
-          }).catch(() => {});
+          // Broadcast fog_style change to player displays via WS
+          wsSendRef.current('fog:style', { style: v });
         }}
       />
       <ContextMenu

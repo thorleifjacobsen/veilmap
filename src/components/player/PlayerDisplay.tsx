@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import type { Session, SSEEvent, FogPaintPayload, FogSnapshotPayload, FullStatePayload, MapObject, CameraViewport, BlackoutPayload, CameraMovePayload } from '@/types';
+import type { Session, FogPaintPayload, FogSnapshotPayload, FullStatePayload, MapObject, CameraViewport, BlackoutPayload, CameraMovePayload } from '@/types';
 import { MAP_W, MAP_H, createFogCanvas, paintHide, revealBox as revealBoxFog, loadFogFromBase64, animateReveal } from '@/lib/fog-engine';
 import { applyViewport, hexToRgba, type Viewport } from '@/lib/viewport';
 import { renderAnimatedFog } from '@/lib/animated-fog';
 import PrepScreen from './PrepScreen';
+import { useSessionWS, type WSEvent } from '@/hooks/useSessionWS';
 
 const FS_BTN_HIDE_DELAY = 3000; // ms — auto-hide fullscreen button after inactivity
 
@@ -24,7 +25,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const pingsRef = useRef<Array<{ x: number; y: number; born: number }>>([]);
   const gridRef = useRef<{ show: boolean; size: number; color: string; opacity: number }>({ show: false, size: 32, color: '#c8963e', opacity: 0.25 });
   const fogStyleRef = useRef<'solid' | 'animated'>('solid');
-  const [connected, setConnected] = useState(false);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
   const [sessionName, setSessionName] = useState('');
@@ -233,197 +233,162 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     });
   }, []);
 
-  // SSE connection
-  useEffect(() => {
-    let eventSource: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
+  // WebSocket message handler
+  const handleWSMessage = useCallback((event: WSEvent) => {
+    const fogCtx = fogCanvasRef.current?.getContext('2d');
 
-    function connect() {
-      eventSource = new EventSource(`/api/sessions/${encodeURIComponent(slug)}/events`);
-
-      eventSource.onmessage = (e) => {
-        try {
-          const event: SSEEvent = JSON.parse(e.data);
-          handleEvent(event);
-        } catch { /* ignore parse errors */ }
-      };
-
-      eventSource.onopen = () => setConnected(true);
-
-      eventSource.onerror = () => {
-        setConnected(false);
-        eventSource?.close();
-        reconnectTimer = setTimeout(connect, 3000);
-      };
-    }
-
-    function handleEvent(event: SSEEvent) {
-      const fogCtx = fogCanvasRef.current?.getContext('2d');
-
-      switch (event.type) {
-        case 'state:full': {
-          const p = event.payload as FullStatePayload;
-          sessionRef.current = p.session;
-          setSessionName(p.session.name);
-          setPrepMode(p.session.prep_mode);
-          setPrepMessage(p.session.prep_message);
-          setConnected(true);
-          if (p.fogPng && fogCtx) loadFogFromBase64(fogCtx, p.fogPng);
-          if (p.session.map_url) {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => { mapImageRef.current = img; };
-            img.src = p.session.map_url;
-          }
-          // Load objects from full state
-          if (p.objects) loadObjectImages(p.objects);
-          // Set camera (from SSE state or DB values)
-          if (p.camera) {
-            cameraRef.current = p.camera;
-            computeViewport();
-          } else if (p.session.camera_x != null && p.session.camera_y != null && p.session.camera_w != null && p.session.camera_h != null) {
-            cameraRef.current = { x: p.session.camera_x, y: p.session.camera_y, w: p.session.camera_w, h: p.session.camera_h };
-            computeViewport();
-          }
-          // Set grid state
-          if (p.grid) {
-            gridRef.current = { show: p.grid.show, size: p.grid.size, color: p.grid.color || '#c8963e', opacity: p.grid.opacity ?? 0.25 };
-          } else if (p.session.show_grid !== undefined) {
-            gridRef.current = { show: p.session.show_grid, size: p.session.grid_size, color: p.session.grid_color || '#c8963e', opacity: p.session.grid_opacity ?? 0.25 };
-          }
-          // Set blackout
-          const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
-          if (bl) setBlackout(bl);
-          // Set fog style
-          if (p.session.fog_style) {
-            fogStyleRef.current = p.session.fog_style as 'solid' | 'animated';
-          }
-          break;
+    switch (event.type) {
+      case 'state:full': {
+        const p = event.payload as FullStatePayload;
+        sessionRef.current = p.session;
+        setSessionName(p.session.name);
+        setPrepMode(p.session.prep_mode);
+        setPrepMessage(p.session.prep_message);
+        if (p.fogPng && fogCtx) loadFogFromBase64(fogCtx, p.fogPng);
+        if (p.session.map_url) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => { mapImageRef.current = img; };
+          img.src = p.session.map_url;
         }
-        case 'fog:paint': {
-          const p = event.payload as FogPaintPayload;
-          if (fogCtx) {
-            if (p.mode === 'reveal') {
-              animateReveal(fogCtx, p.x, p.y, p.radius);
-            } else {
-              paintHide(fogCtx, p.x, p.y, p.radius);
-            }
-          }
-          break;
-        }
-        case 'fog:snapshot': {
-          const p = event.payload as FogSnapshotPayload;
-          if (fogCtx) loadFogFromBase64(fogCtx, p.png);
-          break;
-        }
-        case 'fog:reset': {
-          if (fogCtx) { fogCtx.fillStyle = '#1a1a2e'; fogCtx.fillRect(0, 0, MAP_W, MAP_H); }
-          break;
-        }
-        case 'fog:revealall': {
-          if (fogCtx) { fogCtx.clearRect(0, 0, MAP_W, MAP_H); }
-          break;
-        }
-        case 'box:reveal': {
-          const p = event.payload as { boxId: string };
-          if (sessionRef.current) {
-            const box = sessionRef.current.boxes.find(b => b.id === p.boxId);
-            if (box && fogCtx) revealBoxFog(fogCtx, box);
-            sessionRef.current = {
-              ...sessionRef.current,
-              boxes: sessionRef.current.boxes.map(b => b.id === p.boxId ? { ...b, revealed: true } : b),
-            };
-          }
-          break;
-        }
-        case 'box:hide': {
-          const p = event.payload as { boxId: string };
-          if (sessionRef.current) {
-            sessionRef.current = {
-              ...sessionRef.current,
-              boxes: sessionRef.current.boxes.map(b => b.id === p.boxId ? { ...b, revealed: false } : b),
-            };
-          }
-          break;
-        }
-        case 'box:create': {
-          const box = event.payload as Session['boxes'][0];
-          if (sessionRef.current) {
-            sessionRef.current = { ...sessionRef.current, boxes: [...sessionRef.current.boxes, box] };
-          }
-          break;
-        }
-        case 'box:delete': {
-          const p = event.payload as { boxId: string };
-          if (sessionRef.current) {
-            sessionRef.current = { ...sessionRef.current, boxes: sessionRef.current.boxes.filter(b => b.id !== p.boxId) };
-          }
-          break;
-        }
-        case 'session:prep': {
-          const p = event.payload as { active: boolean; message?: string };
-          setPrepMode(p.active);
-          if (p.message) setPrepMessage(p.message);
-          break;
-        }
-        case 'camera:move': {
-          const p = event.payload as CameraMovePayload;
-          cameraRef.current = p;
+        // Load objects from full state
+        if (p.objects) loadObjectImages(p.objects);
+        // Set camera (from WS state or DB values)
+        if (p.camera) {
+          cameraRef.current = p.camera;
           computeViewport();
-          break;
+        } else if (p.session.camera_x != null && p.session.camera_y != null && p.session.camera_w != null && p.session.camera_h != null) {
+          cameraRef.current = { x: p.session.camera_x, y: p.session.camera_y, w: p.session.camera_w, h: p.session.camera_h };
+          computeViewport();
         }
-        case 'session:blackout': {
-          const p = event.payload as BlackoutPayload;
-          setBlackout(p.active ? p : null);
-          break;
+        // Set grid state
+        if (p.grid) {
+          gridRef.current = { show: p.grid.show, size: p.grid.size, color: p.grid.color || '#c8963e', opacity: p.grid.opacity ?? 0.25 };
+        } else if (p.session.show_grid !== undefined) {
+          gridRef.current = { show: p.session.show_grid, size: p.session.grid_size, color: p.session.grid_color || '#c8963e', opacity: p.session.grid_opacity ?? 0.25 };
         }
-        case 'ping': {
-          const p = event.payload as { x: number; y: number };
-          pingsRef.current.push({ x: p.x, y: p.y, born: Date.now() });
-          break;
+        // Set blackout
+        const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
+        if (bl) setBlackout(bl);
+        // Set fog style
+        if (p.session.fog_style) {
+          fogStyleRef.current = p.session.fog_style as 'solid' | 'animated';
         }
-        case 'grid:update': {
-          const p = event.payload as { show: boolean; size: number; color?: string; opacity?: number };
-          gridRef.current = { show: p.show, size: p.size, color: p.color || gridRef.current.color, opacity: p.opacity ?? gridRef.current.opacity };
-          break;
+        break;
+      }
+      case 'fog:paint': {
+        const p = event.payload as FogPaintPayload;
+        if (fogCtx) {
+          if (p.mode === 'reveal') {
+            animateReveal(fogCtx, p.x, p.y, p.radius);
+          } else {
+            paintHide(fogCtx, p.x, p.y, p.radius);
+          }
         }
-        case 'objects:update': {
-          const p = event.payload as { objects: MapObject[] };
-          loadObjectImages(p.objects);
-          break;
+        break;
+      }
+      case 'fog:snapshot': {
+        const p = event.payload as FogSnapshotPayload;
+        if (fogCtx) loadFogFromBase64(fogCtx, p.png);
+        break;
+      }
+      case 'fog:reset': {
+        if (fogCtx) { fogCtx.fillStyle = '#1a1a2e'; fogCtx.fillRect(0, 0, MAP_W, MAP_H); }
+        break;
+      }
+      case 'fog:revealall': {
+        if (fogCtx) { fogCtx.clearRect(0, 0, MAP_W, MAP_H); }
+        break;
+      }
+      case 'box:reveal': {
+        const p = event.payload as { boxId: string };
+        if (sessionRef.current) {
+          const box = sessionRef.current.boxes.find(b => b.id === p.boxId);
+          if (box && fogCtx) revealBoxFog(fogCtx, box);
+          sessionRef.current = {
+            ...sessionRef.current,
+            boxes: sessionRef.current.boxes.map(b => b.id === p.boxId ? { ...b, revealed: true } : b),
+          };
         }
-        case 'fog:style': {
-          const p = event.payload as { style: string };
-          fogStyleRef.current = (p.style === 'animated') ? 'animated' : 'solid';
-          break;
+        break;
+      }
+      case 'box:hide': {
+        const p = event.payload as { boxId: string };
+        if (sessionRef.current) {
+          sessionRef.current = {
+            ...sessionRef.current,
+            boxes: sessionRef.current.boxes.map(b => b.id === p.boxId ? { ...b, revealed: false } : b),
+          };
         }
-        case 'display:shake': {
-          setShaking(true);
-          setTimeout(() => setShaking(false), 600);
-          break;
+        break;
+      }
+      case 'box:create': {
+        const box = event.payload as Session['boxes'][0];
+        if (sessionRef.current) {
+          sessionRef.current = { ...sessionRef.current, boxes: [...sessionRef.current.boxes, box] };
         }
+        break;
+      }
+      case 'box:delete': {
+        const p = event.payload as { boxId: string };
+        if (sessionRef.current) {
+          sessionRef.current = { ...sessionRef.current, boxes: sessionRef.current.boxes.filter(b => b.id !== p.boxId) };
+        }
+        break;
+      }
+      case 'session:prep': {
+        const p = event.payload as { active: boolean; message?: string };
+        setPrepMode(p.active);
+        if (p.message) setPrepMessage(p.message);
+        break;
+      }
+      case 'camera:move': {
+        const p = event.payload as CameraMovePayload;
+        cameraRef.current = p;
+        computeViewport();
+        break;
+      }
+      case 'session:blackout': {
+        const p = event.payload as BlackoutPayload;
+        setBlackout(p.active ? p : null);
+        break;
+      }
+      case 'ping': {
+        const p = event.payload as { x: number; y: number };
+        pingsRef.current.push({ x: p.x, y: p.y, born: Date.now() });
+        break;
+      }
+      case 'grid:update': {
+        const p = event.payload as { show: boolean; size: number; color?: string; opacity?: number };
+        gridRef.current = { show: p.show, size: p.size, color: p.color || gridRef.current.color, opacity: p.opacity ?? gridRef.current.opacity };
+        break;
+      }
+      case 'objects:update': {
+        const p = event.payload as { objects: MapObject[] };
+        loadObjectImages(p.objects);
+        break;
+      }
+      case 'fog:style': {
+        const p = event.payload as { style: string };
+        fogStyleRef.current = (p.style === 'animated') ? 'animated' : 'solid';
+        break;
+      }
+      case 'display:shake': {
+        setShaking(true);
+        setTimeout(() => setShaking(false), 600);
+        break;
       }
     }
-
-    connect();
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        // Force reconnect when tab becomes visible again
-        eventSource?.close();
-        clearTimeout(reconnectTimer);
-        connect();
-      }
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      clearTimeout(reconnectTimer);
-      eventSource?.close();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug]);
+  }, [loadObjectImages, computeViewport]);
+
+  const { status: wsStatus } = useSessionWS({
+    slug,
+    role: 'player',
+    onMessage: handleWSMessage,
+  });
+
+  const connected = wsStatus === 'connected';
 
   // Fullscreen toggle
   const toggleFullscreen = useCallback(() => {

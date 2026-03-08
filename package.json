@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "tsx watch server.ts",
+    "build": "next build && tsc --project tsconfig.server.json",
+    "start": "node dist/server.js",
     "lint": "next lint",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -21,7 +21,9 @@
     "pg": "^8.20.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "uuid": "^13.0.0"
+    "tsx": "^4.21.0",
+    "uuid": "^13.0.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
