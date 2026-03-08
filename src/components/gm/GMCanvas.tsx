@@ -58,7 +58,11 @@ type UndoType =
   | 'box-create'
   | 'box-reveal'
   | 'box-hide'
-  | 'box-delete';
+  | 'box-delete'
+  | 'camera-move'
+  | 'camera-resize'
+  | 'camera-create'
+  | 'camera-remove';
 
 interface UndoEntry {
   type: UndoType;
@@ -69,6 +73,8 @@ interface UndoEntry {
   objectsAfter?: MapObject[];
   boxesBefore?: Box[];
   boxesAfter?: Box[];
+  cameraBefore?: CameraViewport;
+  cameraAfter?: CameraViewport;
 }
 
 const BOX_COLORS = ['#c8963e', '#e05c2a', '#6a4fc8', '#2a8a4a', '#c8300a', '#2a6a9a', '#888'];
@@ -205,6 +211,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const cameraDragRef = useRef<{ startX: number; startY: number } | null>(null);
   const cameraModeRef = useRef<CameraInteraction>('idle');
   const cameraGrabOffsetRef = useRef({ x: 0, y: 0 });
+  const cameraUndoBeforeRef = useRef<CameraViewport | null>(null);
   const blackoutActiveRef = useRef(false);
   const selectedObjectIdRef = useRef<string | null>(null);
   const objectDragRef = useRef<{ objId: string; offsetX: number; offsetY: number } | null>(null);
@@ -753,6 +760,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         ctx.clearRect(0, 0, MAP_W, MAP_H);
         ctx.drawImage(entry.fogBefore, 0, 0);
         composeFogGM();
+        // Immediately push fog snapshot to player display
+        sendFogSnapshot();
       }
     }
 
@@ -783,10 +792,25 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       boxesRef.current = entry.boxesBefore;
       setBoxes(entry.boxesBefore);
       redrawBoxes();
+      // Persist box state changes to server
+      entry.boxesBefore.forEach((b) => {
+        fetch(`/api/sessions/${slug}/boxes`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(b),
+        }).catch(() => {});
+      });
+    }
+
+    // Restore camera state if present
+    if (entry.cameraBefore) {
+      cameraRef.current = { ...entry.cameraBefore };
+      broadcastCamera(entry.cameraBefore);
+      drawTop();
     }
 
     showNotif(`↩ Undone: ${entry.label}`);
-  }, [composeFogGM, showNotif, drawMap, drawTop, redrawBoxes, slug]);
+  }, [composeFogGM, sendFogSnapshot, showNotif, drawMap, drawTop, redrawBoxes, broadcastCamera, slug]);
 
   const doRevealBox = useCallback(
     (box: Box) => {
@@ -1317,6 +1341,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const cam = cameraRef.current;
         const hitRadius = 12 / vpRef.current.scale;
         const isCustomCam = cam && !(cam.x === 0 && cam.y === 0 && cam.w === MAP_W && cam.h === MAP_H);
+        // Capture camera state before any changes for undo
+        cameraUndoBeforeRef.current = isCustomCam ? { ...cam } : { x: 0, y: 0, w: MAP_W, h: MAP_H };
 
         if (isCustomCam) {
           // Check corner handles for resize
