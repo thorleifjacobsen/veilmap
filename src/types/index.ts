@@ -80,6 +80,7 @@ export type SSEEventType =
   | 'fog:snapshot'
   | 'fog:reset'
   | 'fog:revealall'
+  | 'fog:style'
   | 'box:reveal'
   | 'box:hide'
   | 'box:create'

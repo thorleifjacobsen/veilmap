@@ -36,7 +36,7 @@ import RightPanel from './RightPanel';
 import BoxEditor from './BoxEditor';
 import SettingsModal from './SettingsModal';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
-import { renderAnimatedFog } from '@/lib/animated-fog';
+import { renderAnimatedFogGM } from '@/lib/animated-fog';
 
 // ── Types ──
 
@@ -387,7 +387,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     ctx.drawImage(fogCanvas, 0, 0);
     // Animated fog overlay
     if (fogStyleRef.current === 'animated') {
-      renderAnimatedFog(ctx, fogCanvas, Date.now() / 1000, MAP_W, MAP_H);
+      renderAnimatedFogGM(ctx, fogCanvas, Date.now() / 1000, MAP_W, MAP_H);
     }
     ctx.globalAlpha = 1;
     ctx.restore();
@@ -1743,6 +1743,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       // Camera tool: finalize camera operation
       if (toolRef.current === 'camera' && cameraModeRef.current !== 'idle') {
         const mode = cameraModeRef.current;
+        const camBefore = cameraUndoBeforeRef.current;
         if (mode === 'drawing' && cameraDragRef.current) {
           const ds = cameraDragRef.current;
           const cx = Math.min(ds.startX, mp.x);
@@ -1755,14 +1756,23 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             cameraRef.current = cam;
             broadcastCamera(cam);
             showNotif('📺 Camera viewport set');
+            if (camBefore) {
+              pushUndoEntry({ type: 'camera-create', label: 'camera created', cameraBefore: camBefore, cameraAfter: { ...cam } });
+            }
           }
         } else if (mode === 'dragging' || mode.startsWith('resizing')) {
           const cam = cameraRef.current;
           if (cam) {
             broadcastCamera(cam);
+            const undoType: UndoType = mode === 'dragging' ? 'camera-move' : 'camera-resize';
+            const undoLabel = mode === 'dragging' ? 'camera moved' : 'camera resized';
             showNotif(mode === 'dragging' ? '📺 Camera moved' : '📺 Camera resized');
+            if (camBefore) {
+              pushUndoEntry({ type: undoType, label: undoLabel, cameraBefore: camBefore, cameraAfter: { ...cam } });
+            }
           }
         }
+        cameraUndoBeforeRef.current = null;
         cameraModeRef.current = 'idle';
         drawTop();
         return;
@@ -2512,6 +2522,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           fogStyleRef.current = v;
           fetch(`/api/sessions/${slug}`, {
             method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fog_style: v }),
+          }).catch(() => {});
+          // Broadcast fog_style change to player displays
+          fetch(`/api/sessions/${slug}/fog`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fog_style: v }),
           }).catch(() => {});

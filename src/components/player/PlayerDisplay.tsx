@@ -386,6 +386,11 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           loadObjectImages(p.objects);
           break;
         }
+        case 'fog:style': {
+          const p = event.payload as { style: string };
+          fogStyleRef.current = (p.style === 'animated') ? 'animated' : 'solid';
+          break;
+        }
       }
     }
 
