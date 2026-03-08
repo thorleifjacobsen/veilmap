@@ -198,6 +198,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const cameraThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const objectThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fogSnapshotTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fogDirtyRef = useRef(false);
   const toolRef = useRef<ToolName>('reveal');
   const boxesRef = useRef<Box[]>(session.boxes || []);
   const objectsRef = useRef<MapObject[]>(session.objects || []);
@@ -306,6 +307,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     const fc = fogCanvasRef.current;
     if (!fc) return;
     const png = await fogToBase64(fc);
+    fogDirtyRef.current = false;
     // Send via WS — server persists to DB and broadcasts to players
     wsSendRef.current('fog:snapshot', { png });
   }, []);
@@ -823,6 +825,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const ctx = fogCanvas.getContext('2d')!;
         ctx.clearRect(0, 0, MAP_W, MAP_H);
         ctx.drawImage(entry.fogBefore, 0, 0);
+        fogDirtyRef.current = true;
         composeFogGM();
         // Immediately push fog snapshot to player display
         sendFogSnapshot();
@@ -875,6 +878,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const doRevealBox = useCallback(
     (box: Box) => {
       if (box.revealed) return;
+      fogDirtyRef.current = true;
       const fogSnap = snapFog();
       const beforeBoxes = [...boxesRef.current];
       const fogCanvas = fogCanvasRef.current;
@@ -904,6 +908,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const doHideBox = useCallback(
     (box: Box) => {
+      fogDirtyRef.current = true;
       const fogSnap = snapFog();
       const beforeBoxes = [...boxesRef.current];
       const fogCanvas = fogCanvasRef.current;
@@ -919,11 +924,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       composeFogGM();
       redrawBoxes();
       apiBoxUpdate({ ...box, revealed: false });
+      sendFogSnapshot();
       if (fogSnap) {
         pushUndoEntry({ type: 'box-hide', label: `${box.name} hidden`, fogBefore: fogSnap, boxesBefore: beforeBoxes, boxesAfter: [...updatedBoxes] });
       }
     },
-    [snapFog, pushUndoEntry, composeFogGM, redrawBoxes, apiBoxUpdate],
+    [snapFog, pushUndoEntry, composeFogGM, redrawBoxes, apiBoxUpdate, sendFogSnapshot],
   );
 
   const paintFog = useCallback(
@@ -988,6 +994,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const resetFog = useCallback(() => {
     pushUndo();
+    fogDirtyRef.current = true;
     const fogCanvas = fogCanvasRef.current;
     if (!fogCanvas) return;
     const ctx = fogCanvas.getContext('2d')!;
@@ -1006,6 +1013,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const revealAll = useCallback(() => {
     pushUndo();
+    fogDirtyRef.current = true;
     const fogCanvas = fogCanvasRef.current;
     if (!fogCanvas) return;
     const ctx = fogCanvas.getContext('2d')!;
@@ -1208,8 +1216,23 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     const onResize = () => setTimeout(resize, 60);
     window.addEventListener('resize', onResize);
 
-    // Periodic fog snapshot (every 10s)
-    fogSnapshotTimerRef.current = setInterval(sendFogSnapshot, 10000);
+    // Periodic fog snapshot (every 10s, only if fog has changed)
+    fogSnapshotTimerRef.current = setInterval(() => {
+      if (fogDirtyRef.current) sendFogSnapshot();
+    }, 10000);
+
+    // Save fog snapshot when tab is closed or navigated away
+    const onBeforeUnload = () => {
+      if (!fogDirtyRef.current) return;
+      const fc = fogCanvasRef.current;
+      if (!fc) return;
+      // Synchronous base64 encoding for beforeunload
+      const png = fc.toDataURL('image/png').split(',')[1];
+      fogDirtyRef.current = false;
+      // Send via WS (synchronous queue) — server persists to DB
+      wsSendRef.current('fog:snapshot', { png });
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
 
     // Broadcast DB-stored camera on mount so player gets it immediately
     if (session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null) {
@@ -1226,6 +1249,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
     return () => {
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('beforeunload', onBeforeUnload);
       if (fogSnapshotTimerRef.current) clearInterval(fogSnapshotTimerRef.current);
       if (vpSaveTimerRef.current) clearTimeout(vpSaveTimerRef.current);
       sendFogSnapshot();
@@ -1625,6 +1649,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           paintUndoPushedRef.current = true;
         }
         paintingRef.current = true;
+        fogDirtyRef.current = true;
         lastPaintPosRef.current = { x: mp.x, y: mp.y };
         paintFog(mp.x, mp.y, toolRef.current);
       }
@@ -1634,6 +1659,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           paintUndoPushedRef.current = true;
         }
         paintingRef.current = true;
+        fogDirtyRef.current = true;
         gridRevealCellsRef.current.clear();
         paintGridRevealCell(mp.x, mp.y);
       }
@@ -2087,11 +2113,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       switch (action) {
         case 'reveal':
           pushUndo();
+          fogDirtyRef.current = true;
           paintFog(mapX, mapY, 'reveal');
+          sendFogSnapshot();
           break;
         case 'hide':
           pushUndo();
+          fogDirtyRef.current = true;
           paintFog(mapX, mapY, 'hide');
+          sendFogSnapshot();
           break;
         case 'ping':
           addPing(mapX, mapY);
@@ -2230,7 +2260,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, duplicateObject],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, duplicateObject, sendFogSnapshot],
   );
 
   // ── Box editor callbacks ──
