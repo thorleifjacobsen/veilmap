@@ -73,30 +73,44 @@ export interface Viewport {
   scale: number;
 }
 
-// SSE event types sent from server to player display
-export type SSEEventType =
+// WebSocket event types (replaces SSE)
+export type WSEventType =
   | 'state:full'
   | 'fog:paint'
   | 'fog:snapshot'
   | 'fog:reset'
   | 'fog:revealall'
+  | 'fog:grid-reveal'
   | 'fog:style'
   | 'box:reveal'
   | 'box:hide'
   | 'box:create'
   | 'box:update'
   | 'box:delete'
+  | 'token:create'
+  | 'token:update'
+  | 'token:delete'
+  | 'object:update'
+  | 'object:delete'
+  | 'objects:update'
   | 'session:prep'
   | 'session:settings'
   | 'session:blackout'
   | 'camera:move'
-  | 'objects:update'
+  | 'camera:update'
   | 'grid:update'
   | 'display:shake'
-  | 'ping';
+  | 'audio:play'
+  | 'audio:stop'
+  | 'ping'
+  | 'heartbeat';
 
+/** @deprecated Use WSEventType */
+export type SSEEventType = WSEventType;
+
+/** @deprecated Use WSEvent from @/hooks/useSessionWS */
 export interface SSEEvent {
-  type: SSEEventType;
+  type: string;
   payload: unknown;
 }
 
