@@ -52,7 +52,11 @@ interface RightPanelProps {
 
 type SectionId = 'objects' | 'metaboxes' | 'environment' | 'soundboard';
 
+// Where soundboard audio plays: GM only, Players only, or Both
+export type AudioTarget = 'gm' | 'both' | 'player';
+
 const COLLAPSED_KEY = (slug: string) => `veilmap-panel-collapsed-${slug}`;
+const AUDIO_TARGET_KEY = (slug: string) => `veilmap-audio-target-${slug}`;
 
 function useCollapsedSections(slug: string) {
   const [collapsed, setCollapsed] = useState<Record<SectionId, boolean>>(() => {
@@ -81,6 +85,12 @@ const PARTICLE_OPTIONS: { value: ParticleEffect; label: string; icon: string }[]
   { value: 'embers', label: 'Embers', icon: '🔥' },
   { value: 'mist', label: 'Mist', icon: '🌫' },
 ];
+
+// Visual "playing" indicator duration for player-only effects (we have no onended callback)
+const EFFECT_PLAYER_INDICATOR_MS = 500;
+// Ambient fade-out: 20 steps × 50ms = 1s total
+const FADE_STEPS = 20;
+const FADE_STEP_MS = 50;
 
 export default function RightPanel({
   boxes,
@@ -124,6 +134,19 @@ export default function RightPanel({
   const TOTAL_SLOTS = 12;
   const [slots, setSlots] = useState<(SoundSlot | null)[]>(() => Array(TOTAL_SLOTS).fill(null));
   const [masterVolume, setMasterVolume] = useState(0.8);
+  const [audioTarget, setAudioTarget] = useState<AudioTarget>(() => {
+    try {
+      const stored = localStorage.getItem(AUDIO_TARGET_KEY(slug));
+      if (stored === 'gm' || stored === 'player' || stored === 'both') return stored;
+    } catch { /* ignore */ }
+    return 'both';
+  });
+  const audioTargetRef = useRef<AudioTarget>(audioTarget);
+  useEffect(() => { audioTargetRef.current = audioTarget; }, [audioTarget]);
+  const setAudioTargetPersist = useCallback((t: AudioTarget) => {
+    setAudioTarget(t);
+    try { localStorage.setItem(AUDIO_TARGET_KEY(slug), t); } catch { /* ignore */ }
+  }, [slug]);
   const [playingAmbientId, setPlayingAmbientId] = useState<string | null>(null);
   const [playingEffects, setPlayingEffects] = useState<Set<string>>(new Set());
   const [editingSlot, setEditingSlot] = useState<{ index: number; slot: SoundSlot | null } | null>(null);
@@ -216,59 +239,87 @@ export default function RightPanel({
   const sortedObjects = [...objects].sort((a, b) => b.zIndex - a.zIndex);
 
   // ── Soundboard: stop ambient (with optional fade) ──
-  const stopAmbient = useCallback((fade: boolean = true) => {
+  const stopAmbient = useCallback((fade: boolean = true, sendStop: boolean = false) => {
     const ambientAudio = ambientAudioRef.current;
-    if (!ambientAudio.el) return;
+    if (!ambientAudio.el) {
+      // If no local audio but we were playing on player, still send stop
+      if (sendStop && audioTargetRef.current !== 'gm') {
+        onWsSend('audio:stop', {});
+      }
+      ambientAudio.slotId = null;
+      setPlayingAmbientId(null);
+      return;
+    }
     const audio = ambientAudio.el;
     ambientAudio.el = null;
     ambientAudio.slotId = null;
     setPlayingAmbientId(null);
+    if (sendStop && audioTargetRef.current !== 'gm') {
+      onWsSend('audio:stop', {});
+    }
     if (fade) {
       const startVol = audio.volume;
-      const steps = 20;
       let step = 0;
       const interval = setInterval(() => {
         step++;
-        audio.volume = Math.max(0, startVol * (1 - step / steps));
-        if (step >= steps) {
+        audio.volume = Math.max(0, startVol * (1 - step / FADE_STEPS));
+        if (step >= FADE_STEPS) {
           audio.pause();
           audio.currentTime = 0;
           clearInterval(interval);
         }
-      }, 50);
+      }, FADE_STEP_MS);
     } else {
       audio.pause();
       audio.currentTime = 0;
     }
-  }, []);
+  }, [onWsSend]);
 
   const playAmbient = useCallback((slot: SoundSlot, vol: number) => {
     stopAmbient(true);
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.loop = true;
-    audio.volume = Math.min(1, Math.max(0, slot.volume * vol));
-    audio.src = slot.fileUrl;
-    audio.play().catch((err) => console.warn('[Soundboard] Ambient play failed:', err));
-    ambientAudioRef.current.el = audio;
+    const target = audioTargetRef.current;
+    if (target !== 'player') {
+      // Play locally on GM
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.loop = true;
+      audio.volume = Math.min(1, Math.max(0, slot.volume * vol));
+      audio.src = slot.fileUrl;
+      audio.play().catch((err) => console.warn('[Soundboard] Ambient play failed:', err));
+      ambientAudioRef.current.el = audio;
+    }
     ambientAudioRef.current.slotId = slot.id;
     setPlayingAmbientId(slot.id);
-    onWsSend('audio:play', { url: slot.fileUrl, volume: slot.volume * vol, loop: true });
+    if (target !== 'gm') {
+      onWsSend('audio:play', { url: slot.fileUrl, volume: slot.volume * vol, loop: true });
+    }
   }, [stopAmbient, onWsSend]);
 
   const playEffect = useCallback((slot: SoundSlot, vol: number) => {
-    const audio = new Audio();
-    audio.preload = 'auto';
-    audio.volume = Math.min(1, Math.max(0, slot.volume * vol));
-    audio.src = slot.fileUrl;
-    effectAudioSetRef.current.add(audio);
-    audio.play().catch((err) => console.warn('[Soundboard] Effect play failed:', err));
+    const target = audioTargetRef.current;
+    if (target !== 'player') {
+      // Play locally on GM
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.volume = Math.min(1, Math.max(0, slot.volume * vol));
+      audio.src = slot.fileUrl;
+      effectAudioSetRef.current.add(audio);
+      audio.play().catch((err) => console.warn('[Soundboard] Effect play failed:', err));
+      audio.onended = () => {
+        effectAudioSetRef.current.delete(audio);
+        setPlayingEffects(prev => { const s = new Set(prev); s.delete(slot.id); return s; });
+      };
+    }
     setPlayingEffects(prev => new Set(prev).add(slot.id));
-    audio.onended = () => {
-      effectAudioSetRef.current.delete(audio);
-      setPlayingEffects(prev => { const s = new Set(prev); s.delete(slot.id); return s; });
-    };
-    onWsSend('audio:play', { url: slot.fileUrl, volume: slot.volume * vol, loop: false });
+    if (target !== 'gm') {
+      onWsSend('audio:play', { url: slot.fileUrl, volume: slot.volume * vol, loop: false });
+    }
+    if (target === 'player') {
+      // No local audio for one-shots in player-only mode — clear indicator after brief visual feedback
+      setTimeout(() => {
+        setPlayingEffects(prev => { const s = new Set(prev); s.delete(slot.id); return s; });
+      }, EFFECT_PLAYER_INDICATOR_MS);
+    }
   }, [onWsSend]);
 
   const stopEffect = useCallback((slot: SoundSlot) => {
@@ -288,7 +339,7 @@ export default function RightPanel({
   const handleSlotClick = useCallback((slot: SoundSlot) => {
     if (slot.type === 'ambient') {
       if (playingAmbientId === slot.id) {
-        stopAmbient(true);
+        stopAmbient(true, true);
       } else {
         playAmbient(slot, masterVolume);
       }
@@ -571,6 +622,30 @@ export default function RightPanel({
             style={{ background: 'rgba(200,150,62,.2)' }}
           />
           <span className="w-6 text-right text-[.52rem]" style={{ fontFamily: "'Cinzel',serif", color: '#c8963e' }}>{Math.round(masterVolume * 100)}%</span>
+        </div>
+
+        {/* Play-on target */}
+        <div className="mb-2 flex items-center gap-1">
+          <span className="shrink-0 text-[.52rem] uppercase tracking-[.06em]" style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}>Play on</span>
+          <div className="ml-1 flex flex-1 overflow-hidden rounded border" style={{ borderColor: 'rgba(200,150,62,.25)' }}>
+            {(['gm', 'both', 'player'] as const).map((t, i) => (
+              <button
+                key={t}
+                onClick={() => setAudioTargetPersist(t)}
+                className="flex-1 py-0.5 text-[.52rem] uppercase tracking-[.05em] transition-all"
+                style={{
+                  fontFamily: "'Cinzel',serif",
+                  background: audioTarget === t ? 'rgba(200,150,62,.25)' : 'transparent',
+                  color: audioTarget === t ? '#c8963e' : 'rgba(212,196,160,.4)',
+                  borderLeft: i > 0 ? '1px solid rgba(200,150,62,.2)' : 'none',
+                  cursor: 'pointer',
+                  border: i > 0 ? undefined : 'none',
+                }}
+              >
+                {t === 'gm' ? '🖥 GM' : t === 'both' ? '⇄ Both' : '📺 Player'}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mb-1.5">

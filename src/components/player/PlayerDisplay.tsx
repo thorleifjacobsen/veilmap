@@ -185,6 +185,10 @@ function updateAndDrawParticles(
   return alive;
 }
 
+// Ambient fade-out: 20 steps × 50ms = 1s total (matches GM-side)
+const FADE_STEPS = 20;
+const FADE_STEP_MS = 50;
+
 export default function PlayerDisplay({ slug }: { slug: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasBgRef = useRef<HTMLCanvasElement>(null);
@@ -204,6 +208,8 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const particleIntensityRef = useRef<number>(50);
   const particleRafRef = useRef<number>(0);
   const particlesRef = useRef<Particle[]>([]);
+  // Track player-side ambient audio so we can stop it via audio:stop event
+  const playerAmbientRef = useRef<HTMLAudioElement | null>(null);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
   const [sessionName, setSessionName] = useState('');
@@ -556,11 +562,47 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       case 'audio:play': {
         const p = event.payload as { url: string; volume: number; loop: boolean };
         if (p.url) {
-          const audio = new Audio(p.url);
-          audio.volume = Math.min(1, Math.max(0, p.volume ?? 1));
-          audio.loop = !!p.loop;
-          audio.play().catch(() => {});
-          // No cleanup needed for one-shot audio — GC collects it after playback
+          if (p.loop) {
+            // Stop any existing ambient before starting the new one
+            if (playerAmbientRef.current) {
+              playerAmbientRef.current.pause();
+              playerAmbientRef.current.currentTime = 0;
+              playerAmbientRef.current = null;
+            }
+            const audio = new Audio();
+            audio.preload = 'auto';
+            audio.volume = Math.min(1, Math.max(0, p.volume ?? 1));
+            audio.loop = true;
+            audio.src = p.url;
+            audio.play().catch(() => {});
+            playerAmbientRef.current = audio;
+          } else {
+            const audio = new Audio();
+            audio.preload = 'auto';
+            audio.volume = Math.min(1, Math.max(0, p.volume ?? 1));
+            audio.src = p.url;
+            audio.play().catch(() => {});
+            // No cleanup needed for one-shot audio — GC collects it after playback
+          }
+        }
+        break;
+      }
+      case 'audio:stop': {
+        // Stop player-side ambient audio with a short fade-out
+        const ambient = playerAmbientRef.current;
+        if (ambient) {
+          playerAmbientRef.current = null;
+          const startVol = ambient.volume;
+          let step = 0;
+          const interval = setInterval(() => {
+            step++;
+            ambient.volume = Math.max(0, startVol * (1 - step / FADE_STEPS));
+            if (step >= FADE_STEPS) {
+              ambient.pause();
+              ambient.currentTime = 0;
+              clearInterval(interval);
+            }
+          }, FADE_STEP_MS);
         }
         break;
       }
