@@ -299,7 +299,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       fetch(`/api/sessions/${slug}/boxes`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ boxId: box.id, revealed: box.revealed, name: box.name, type: box.type, color: box.color, notes: box.notes, x: box.x, y: box.y, w: box.w, h: box.h, points: box.points }),
+        body: JSON.stringify({ ...box, boxId: box.id }),
       }).catch(() => {});
     },
     [slug],
@@ -797,7 +797,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         fetch(`/api/sessions/${slug}/boxes`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ boxId: b.id, revealed: b.revealed, name: b.name, type: b.type, color: b.color, notes: b.notes, x: b.x, y: b.y, w: b.w, h: b.h, points: b.points }),
+          body: JSON.stringify({ ...b, boxId: b.id }),
         }).catch(() => {});
       });
     }
