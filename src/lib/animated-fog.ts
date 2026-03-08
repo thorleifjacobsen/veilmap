@@ -1,6 +1,6 @@
 /**
  * Animated fog effect using simplex noise.
- * Renders a slow-moving mist pattern on the fog canvas.
+ * Renders realistic dark cloud/mist that drifts slowly over fogged areas.
  * Only visible where fog exists (alpha > 0 in the fog mask).
  */
 
@@ -98,14 +98,8 @@ function ensureMistCanvas(w: number, h: number) {
 
 /**
  * Render animated fog on the player display.
- * Draws swirling mist tendrils that are clearly visible over the fog areas.
+ * Draws realistic dark cloud/mist in grayscale tones drifting slowly.
  * Uses compositing so the effect only shows where fog exists.
- *
- * @param ctx - The canvas context to draw the mist onto (already in viewport transform)
- * @param fogCanvas - The fog mask canvas (opaque = fogged, transparent = revealed)
- * @param time - Current time in seconds (for animation)
- * @param width - Map width in map coordinates
- * @param height - Map height in map coordinates
  */
 export function renderAnimatedFog(
   ctx: CanvasRenderingContext2D,
@@ -114,7 +108,7 @@ export function renderAnimatedFog(
   width: number,
   height: number,
 ): void {
-  const CELL = 16;
+  const CELL = 14;
   const cols = Math.ceil(width / CELL);
   const rows = Math.ceil(height / CELL);
 
@@ -128,37 +122,38 @@ export function renderAnimatedFog(
   // Now draw mist using 'source-atop' so it only appears where the fog mask has pixels
   mCtx.globalCompositeOperation = 'source-atop';
 
-  // Slow drifting offsets for organic movement
-  const drift1 = time * 0.012;
-  const drift2 = time * 0.008;
-  const drift3 = time * 0.018;
+  // Multiple slow drifting offsets for layered cloud movement
+  const drift1x = time * 0.006;
+  const drift1y = time * 0.003;
+  const drift2x = time * -0.004;
+  const drift2y = time * 0.005;
+  const drift3x = time * 0.008;
+  const drift3y = time * -0.002;
 
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const px = col * CELL;
       const py = row * CELL;
 
-      // Layer 1: large-scale swirls (low frequency, high amplitude)
-      const n1 = fbm(col * 0.025 + drift1, row * 0.025 + drift2, 3);
-      // Layer 2: medium detail wisps (different direction/speed)
-      const n2 = fbm(col * 0.06 - drift2 * 1.3, row * 0.06 + drift3, 2);
-      // Layer 3: fine sparkle/shimmer
-      const n3 = simplex2(col * 0.15 + drift3 * 2, row * 0.15 - drift1 * 1.5);
+      // Layer 1: large billowing clouds (low frequency, high influence)
+      const n1 = fbm(col * 0.018 + drift1x, row * 0.018 + drift1y, 4);
+      // Layer 2: medium wisps drifting opposite direction
+      const n2 = fbm(col * 0.045 + drift2x, row * 0.045 + drift2y, 3);
+      // Layer 3: fine detail turbulence
+      const n3 = simplex2(col * 0.12 + drift3x, row * 0.12 + drift3y);
 
-      // Combine layers: base mist color with visible variation
-      // Base fog is #1a1a2e (26, 26, 46) — we create lighter wisps over it
-      const mistBright = n1 * 0.4 + n2 * 0.3 + n3 * 0.1; // [-0.8, 0.8]
-      const alpha = 0.15 + mistBright * 0.25; // [~0.0, ~0.35]
+      // Combine: weighted blend of cloud layers
+      const cloud = n1 * 0.55 + n2 * 0.30 + n3 * 0.15; // [-1, 1]
 
-      if (alpha <= 0.02) continue;
+      // Map to grayscale brightness: dark fog base with lighter cloud highlights
+      // cloud ~ -1 → very dark (near black), cloud ~ +1 → lighter gray wisps
+      const brightness = Math.round(Math.max(0, Math.min(255, 18 + (cloud + 1) * 30))); // range ~18-78
+      const alpha = 0.25 + cloud * 0.2; // ~0.05 to ~0.45
 
-      // Lighter wisps: blend from deep blue to a ghostly blue-white
-      const r = Math.round(40 + mistBright * 60);  // 10-70
-      const g = Math.round(40 + mistBright * 60);  // 10-70
-      const b = Math.round(65 + mistBright * 80);  // 25-105
-      const a = Math.min(0.6, Math.max(0.03, alpha));
+      if (alpha <= 0.03) continue;
+      const a = Math.min(0.55, Math.max(0.03, alpha));
 
-      mCtx.fillStyle = `rgba(${r},${g},${b},${(a * 100 | 0) / 100})`;
+      mCtx.fillStyle = `rgba(${brightness},${brightness},${brightness + 3},${(a * 100 | 0) / 100})`;
       mCtx.fillRect(px, py, CELL, CELL);
     }
   }
@@ -171,8 +166,7 @@ export function renderAnimatedFog(
 }
 
 /**
- * Lightweight animated fog for GM view — just subtle variation, not full mist.
- * The GM needs to see through the fog, so this is much more subtle.
+ * Lightweight animated fog for GM view — subtle gray variation so GM can see through.
  */
 export function renderAnimatedFogGM(
   ctx: CanvasRenderingContext2D,
@@ -189,7 +183,8 @@ export function renderAnimatedFogGM(
   if (!fogCtx) return;
   const fogData = fogCtx.getImageData(0, 0, fogCanvas.width, fogCanvas.height).data;
 
-  const drift = time * 0.012;
+  const driftX = time * 0.006;
+  const driftY = time * 0.003;
 
   ctx.save();
   for (let row = 0; row < rows; row++) {
@@ -202,12 +197,9 @@ export function renderAnimatedFogGM(
       const alphaIdx = (fogY * fogCanvas.width + fogX) * 4 + 3;
       if (fogData[alphaIdx] < 128) continue;
 
-      const n = fbm(col * 0.03 + drift, row * 0.03 + drift * 0.7, 2);
-      const variation = n * 20;
-      const r = Math.round(Math.max(0, Math.min(255, 30 + variation)));
-      const g = Math.round(Math.max(0, Math.min(255, 30 + variation)));
-      const b = Math.round(Math.max(0, Math.min(255, 50 + variation * 1.2)));
-      ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
+      const n = fbm(col * 0.025 + driftX, row * 0.025 + driftY, 2);
+      const brightness = Math.round(Math.max(0, Math.min(60, 25 + n * 20)));
+      ctx.fillStyle = `rgba(${brightness},${brightness},${brightness + 2},0.12)`;
       ctx.fillRect(px, py, CELL, CELL);
     }
   }

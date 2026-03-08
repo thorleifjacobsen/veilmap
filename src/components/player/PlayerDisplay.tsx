@@ -477,13 +477,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       <div className="absolute inset-0 pointer-events-none" style={{
         background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,.7) 100%)',
       }} />
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-3 py-1.5" style={{
-        background: 'rgba(0,0,0,.8)', borderBottom: '1px solid rgba(200,150,62,.1)',
-      }}>
-        <div style={{ fontFamily: 'Cinzel, serif', fontSize: '.75rem', color: 'rgba(200,150,62,.4)', letterSpacing: '.2em' }}>
-          VEILMAP — {sessionName.toUpperCase()}
-        </div>
-      </div>
       <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-3 py-1" style={{
         background: 'rgba(0,0,0,.65)', borderTop: '1px solid rgba(200,150,62,.07)',
       }}>

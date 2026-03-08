@@ -296,10 +296,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const apiBoxUpdate = useCallback(
     (box: Box) => {
-      fetch(`/api/sessions/${slug}/boxes/${box.id}`, {
+      fetch(`/api/sessions/${slug}/boxes`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(box),
+        body: JSON.stringify({ boxId: box.id, revealed: box.revealed, name: box.name, type: box.type, color: box.color, notes: box.notes, x: box.x, y: box.y, w: box.w, h: box.h, points: box.points }),
       }).catch(() => {});
     },
     [slug],
@@ -797,7 +797,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         fetch(`/api/sessions/${slug}/boxes`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(b),
+          body: JSON.stringify({ boxId: b.id, revealed: b.revealed, name: b.name, type: b.type, color: b.color, notes: b.notes, x: b.x, y: b.y, w: b.w, h: b.h, points: b.points }),
         }).catch(() => {});
       });
     }
@@ -1598,11 +1598,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           paintFog(mp.x, mp.y, toolRef.current);
         }
         lastPaintPosRef.current = { x: mp.x, y: mp.y };
+        drawTop();
         return;
       }
 
       if (paintingRef.current && toolRef.current === 'gridReveal') {
         paintGridRevealCell(mp.x, mp.y);
+        drawTop();
         return;
       }
 
