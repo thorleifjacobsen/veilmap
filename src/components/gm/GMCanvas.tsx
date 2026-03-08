@@ -83,7 +83,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 const MAX_UNDO = 50;
 const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a polygon
-const MIN_OBJECT_SIZE = 20; // px — minimum object width/height when resizing
+const MIN_OBJECT_SIZE = 4; // px — minimum object width/height when resizing
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
   box: 'Click to place polygon vertices (Shift=snap), click near first to close',
   select: 'Click to select · Drag to resize · Hold Shift for free scale',
@@ -632,19 +632,33 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       if (obj) {
         ctx.save();
         applyViewport(ctx, vp);
-        ctx.strokeStyle = 'rgba(0,180,255,.8)';
-        ctx.lineWidth = 2 / vp.scale;
-        ctx.setLineDash([]);
-        ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
-        const hs = 9 / vp.scale;
-        ctx.fillStyle = 'rgba(0,180,255,.9)';
-        [[obj.x, obj.y], [obj.x + obj.w, obj.y], [obj.x, obj.y + obj.h], [obj.x + obj.w, obj.y + obj.h]].forEach(([cx, cy]) => {
-          ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
-        });
-        const ms = 7 / vp.scale;
-        [[obj.x + obj.w / 2, obj.y], [obj.x + obj.w / 2, obj.y + obj.h], [obj.x, obj.y + obj.h / 2], [obj.x + obj.w, obj.y + obj.h / 2]].forEach(([cx, cy]) => {
-          ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
-        });
+        if (obj.locked) {
+          // Locked: dashed gray outline, no resize handles
+          ctx.strokeStyle = 'rgba(180,180,180,.5)';
+          ctx.lineWidth = 2 / vp.scale;
+          ctx.setLineDash([6 / vp.scale, 4 / vp.scale]);
+          ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+          ctx.setLineDash([]);
+          // Lock icon indicator (🔒) at top-right
+          const fontSize = Math.max(12, 16 / vp.scale);
+          ctx.font = `${fontSize}px sans-serif`;
+          ctx.fillText('🔒', obj.x + obj.w + 4 / vp.scale, obj.y - 4 / vp.scale);
+        } else {
+          // Unlocked: solid blue outline with resize handles
+          ctx.strokeStyle = 'rgba(0,180,255,.8)';
+          ctx.lineWidth = 2 / vp.scale;
+          ctx.setLineDash([]);
+          ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+          const hs = 9 / vp.scale;
+          ctx.fillStyle = 'rgba(0,180,255,.9)';
+          [[obj.x, obj.y], [obj.x + obj.w, obj.y], [obj.x, obj.y + obj.h], [obj.x + obj.w, obj.y + obj.h]].forEach(([cx, cy]) => {
+            ctx.fillRect(cx - hs / 2, cy - hs / 2, hs, hs);
+          });
+          const ms = 7 / vp.scale;
+          [[obj.x + obj.w / 2, obj.y], [obj.x + obj.w / 2, obj.y + obj.h], [obj.x, obj.y + obj.h / 2], [obj.x + obj.w, obj.y + obj.h / 2]].forEach(([cx, cy]) => {
+            ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
+          });
+        }
         ctx.restore();
       }
     }
@@ -1811,16 +1825,27 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   }, [drawTop, sendFogSnapshot]);
 
   const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+    (e: WheelEvent) => {
       e.preventDefault();
-      const { sx, sy } = getCanvasPos(e as unknown as ReactMouseEvent);
+      const rect = canvasInterRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
       vpRef.current = zoomAt(vpRef.current, sx, sy, factor);
       setZoomPercent(Math.round(vpRef.current.scale * 100));
       redrawAll();
     },
-    [getCanvasPos, redrawAll],
+    [redrawAll],
   );
+
+  // Register wheel handler as non-passive to allow preventDefault
+  useEffect(() => {
+    const el = canvasInterRef.current;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   const handleContextMenu = useCallback(
     (e: ReactMouseEvent) => {
@@ -2348,7 +2373,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
-            onWheel={handleWheel}
             onContextMenu={handleContextMenu}
           />
 

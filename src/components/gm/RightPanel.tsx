@@ -249,7 +249,10 @@ export default function RightPanel({
                     {obj.name}
                   </span>
                 )}
-                {/* Minimal controls — visibility toggles */}
+                {/* Minimal controls — lock indicator + visibility toggles */}
+                {obj.locked && (
+                  <span title="Locked" style={{ fontSize: '.6rem', opacity: 0.5 }}>🔒</span>
+                )}
                 <MiniBtn
                   title={obj.playerVisible === false ? 'Show on Player' : 'Hide on Player'}
                   onClick={() => onObjectUpdate(obj.id, { playerVisible: !obj.playerVisible })}
@@ -394,13 +397,22 @@ export default function RightPanel({
                   ▼ Move Down
                 </div>
                 <div style={{ borderTop: '1px solid rgba(200,150,62,.15)', margin: '2px 0' }} />
-                <div
-                  className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
-                  style={{ fontFamily: "'Cinzel',serif", color: '#e05c2a' }}
-                  onClick={() => { onObjectDelete(obj.id); setObjectMenuId(null); }}
-                >
-                  ✕ Delete
-                </div>
+                {obj.locked ? (
+                  <div
+                    className="px-3 py-1.5 text-[.68rem]"
+                    style={{ fontFamily: "'Cinzel',serif", color: 'rgba(100,100,100,.5)', cursor: 'not-allowed' }}
+                  >
+                    ✕ Delete (locked)
+                  </div>
+                ) : (
+                  <div
+                    className="cursor-pointer px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                    style={{ fontFamily: "'Cinzel',serif", color: '#e05c2a' }}
+                    onClick={() => { onObjectDelete(obj.id); setObjectMenuId(null); }}
+                  >
+                    ✕ Delete
+                  </div>
+                )}
               </>
             );
           })()}
