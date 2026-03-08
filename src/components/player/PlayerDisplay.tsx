@@ -132,7 +132,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
 
     // --- Update HTML object layer transform and clip ---
     setHtmlVpTransform(`translate(${vp.x}px,${vp.y}px) scale(${vp.scale})`);
-    setPlayerObjects([...objectsRef.current]);
     if (isCustomCam) {
       const screenX = vp.x + cam.x * vp.scale;
       const screenY = vp.y + cam.y * vp.scale;
@@ -215,9 +214,10 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     return () => cancelAnimationFrame(rafRef.current);
   }, [render]);
 
-  // Helper to preload object images
+  // Helper to preload object images and push to React state
   const loadObjectImages = useCallback((objs: MapObject[]) => {
     objectsRef.current = objs;
+    setPlayerObjects(objs);
     // Clean up stale image entries
     const currentIds = new Set(objs.map(o => o.id));
     for (const id of objectImagesRef.current.keys()) {

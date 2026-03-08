@@ -38,6 +38,7 @@ import SettingsModal from './SettingsModal';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
 import { renderAnimatedFogGM } from '@/lib/animated-fog';
 import { useSessionWS } from '@/hooks/useSessionWS';
+import { dialogConfirm, dialogPrompt } from '@/components/DialogModal';
 
 // ── Types ──
 
@@ -85,7 +86,7 @@ const TYPE_COLORS: Record<string, string> = {
   autoReveal: '#c8963e', trigger: '#a080e0', hazard: '#e05c2a', note: '#5aba6a', hidden: '#555',
 };
 const MAX_UNDO = 50;
-const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a polygon
+const POLYGON_SNAP_DISTANCE = 8; // px — how close to first vertex to close a polygon
 const MIN_OBJECT_SIZE = 4; // px — minimum object width/height when resizing
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
   box: 'Click to place polygon vertices (Shift=snap), click near first to close',
@@ -220,6 +221,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const selectedObjectIdRef = useRef<string | null>(null);
   const objectDragRef = useRef<{ objId: string; offsetX: number; offsetY: number } | null>(null);
   const objectResizeRef = useRef<{ objId: string; corner: string; startX: number; startY: number; origObj: MapObject } | null>(null);
+  const objectRotateRef = useRef<{ objId: string; startAngle: number; origRotation: number } | null>(null);
   const objectUndoBeforeRef = useRef<MapObject | null>(null);
   const snapToGridRef = useRef(false);
   const gridDrawStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -660,6 +662,36 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           [[obj.x + obj.w / 2, obj.y], [obj.x + obj.w / 2, obj.y + obj.h], [obj.x, obj.y + obj.h / 2], [obj.x + obj.w, obj.y + obj.h / 2]].forEach(([cx, cy]) => {
             ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
           });
+          // Rotation handle — circle above top center
+          const rotHandleY = obj.y - 30 / vp.scale;
+          const rotHandleCx = obj.x + obj.w / 2;
+          // Stem line
+          ctx.strokeStyle = 'rgba(0,180,255,.5)';
+          ctx.lineWidth = 1.5 / vp.scale;
+          ctx.beginPath();
+          ctx.moveTo(rotHandleCx, obj.y);
+          ctx.lineTo(rotHandleCx, rotHandleY);
+          ctx.stroke();
+          // Circle
+          const rr = 6 / vp.scale;
+          ctx.fillStyle = 'rgba(0,180,255,.9)';
+          ctx.beginPath();
+          ctx.arc(rotHandleCx, rotHandleY, rr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1.2 / vp.scale;
+          ctx.stroke();
+        }
+
+        // Show rotation angle while rotating
+        if (objectRotateRef.current && objectRotateRef.current.objId === obj.id) {
+          const deg = Math.round(obj.rotation || 0);
+          const fontSize = Math.max(11, 14 / vp.scale);
+          ctx.font = `bold ${fontSize}px Cinzel,serif`;
+          ctx.fillStyle = '#fff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(`${deg}°`, obj.x + obj.w / 2, obj.y - 36 / vp.scale);
         }
         ctx.restore();
       }
@@ -1317,20 +1349,24 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         if (selId) {
           const obj = objectsRef.current.find(o => o.id === selId);
           if (obj) {
+            const doDelete = () => {
+              const before = [...objectsRef.current];
+              const updated = objectsRef.current.filter(o => o.id !== selId);
+              objectsRef.current = updated;
+              setObjects(updated);
+              setSelectedObjectId(null);
+              selectedObjectIdRef.current = null;
+              drawMap();
+              drawTop();
+              wsSendRef.current('objects:update', { objects: updated });
+              undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+              showNotif(`Deleted: ${obj.name}`);
+            };
             if (obj.locked) {
-              if (!window.confirm(`"${obj.name}" is locked. Delete anyway?`)) return;
+              dialogConfirm('Delete Locked Object', `"${obj.name}" is locked. Delete anyway?`, true).then(ok => { if (ok) doDelete(); });
+            } else {
+              doDelete();
             }
-            const before = [...objectsRef.current];
-            const updated = objectsRef.current.filter(o => o.id !== selId);
-            objectsRef.current = updated;
-            setObjects(updated);
-            setSelectedObjectId(null);
-            selectedObjectIdRef.current = null;
-            drawMap();
-            drawTop();
-            wsSendRef.current('objects:update', { objects: updated });
-            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
-            showNotif(`Deleted: ${obj.name}`);
           }
         }
       }
@@ -1398,6 +1434,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const handleMouseDown = useCallback(
     (e: ReactMouseEvent) => {
+      // Close any open context menu on any canvas click
+      setContextMenu((prev) => prev.open ? { ...prev, open: false } : prev);
+
       // Middle click or space+left → pan
       if (e.button === 1 || (e.button === 0 && spaceHeldRef.current)) {
         panningRef.current = true;
@@ -1463,8 +1502,22 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       // Object selection, drag, and resize
       if (toolRef.current === 'select') {
         const selObj = selectedObjectIdRef.current ? objectsRef.current.find(o => o.id === selectedObjectIdRef.current) : null;
+        if (selObj && !selObj.locked) {
+          // Check rotation handle first (circle above top center)
+          const rotHandleX = selObj.x + selObj.w / 2;
+          const rotHandleY = selObj.y - 30 / vpRef.current.scale;
+          const rotHitR = 10 / vpRef.current.scale;
+          if (Math.hypot(mp.x - rotHandleX, mp.y - rotHandleY) < rotHitR) {
+            const centerX = selObj.x + selObj.w / 2;
+            const centerY = selObj.y + selObj.h / 2;
+            const startAngle = Math.atan2(mp.y - centerY, mp.x - centerX) * 180 / Math.PI;
+            objectRotateRef.current = { objId: selObj.id, startAngle, origRotation: selObj.rotation || 0 };
+            objectUndoBeforeRef.current = { ...selObj };
+            return;
+          }
+        }
         if (selObj) {
-          const hs = 14 / vpRef.current.scale;
+          const hs = 8 / vpRef.current.scale;
           const corners = [
             { corner: 'tl', x: selObj.x, y: selObj.y },
             { corner: 'tr', x: selObj.x + selObj.w, y: selObj.y },
@@ -1654,6 +1707,36 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         }
         return;
       }
+      if (objectRotateRef.current) {
+        const rot = objectRotateRef.current;
+        const obj = objectsRef.current.find(o => o.id === rot.objId);
+        if (obj) {
+          const centerX = obj.x + obj.w / 2;
+          const centerY = obj.y + obj.h / 2;
+          const currentAngle = Math.atan2(mp.y - centerY, mp.x - centerX) * 180 / Math.PI;
+          let newRotation = rot.origRotation + (currentAngle - rot.startAngle);
+          // Shift held: snap to 15° increments
+          if (shiftHeldRef.current) {
+            newRotation = Math.round(newRotation / 15) * 15;
+          }
+          // Normalize to 0-360
+          newRotation = ((newRotation % 360) + 360) % 360;
+          const updated = objectsRef.current.map(o =>
+            o.id === rot.objId ? { ...o, rotation: newRotation } : o
+          );
+          objectsRef.current = updated;
+          setObjects(updated);
+          drawMap();
+          drawTop();
+          if (!objectThrottleRef.current) {
+            objectThrottleRef.current = setTimeout(() => {
+              objectThrottleRef.current = null;
+              broadcastObjects(objectsRef.current);
+            }, 150);
+          }
+        }
+        return;
+      }
 
       if (paintingRef.current && (toolRef.current === 'reveal' || toolRef.current === 'hide')) {
         // Interpolate between last position and current position
@@ -1777,6 +1860,24 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
               type: 'object-resize',
               label: 'object resized',
               objectsBefore: objectsRef.current.map(o => o.id === resizeObjId ? objectUndoBeforeRef.current! : o),
+              objectsAfter: [...objectsRef.current],
+            });
+          }
+          objectUndoBeforeRef.current = null;
+        }
+        wsSendRef.current('objects:update', { objects: objectsRef.current });
+        return;
+      }
+      if (objectRotateRef.current) {
+        const rotateObjId = objectRotateRef.current.objId;
+        objectRotateRef.current = null;
+        if (objectUndoBeforeRef.current) {
+          const afterObj = objectsRef.current.find(o => o.id === rotateObjId);
+          if (afterObj) {
+            pushUndoEntry({
+              type: 'object-rotate',
+              label: 'object rotated',
+              objectsBefore: objectsRef.current.map(o => o.id === rotateObjId ? objectUndoBeforeRef.current! : o),
               objectsAfter: [...objectsRef.current],
             });
           }
@@ -1978,14 +2079,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
         case 'renameObject':
           if (ctxObj) {
-            const newName = window.prompt('Rename object:', ctxObj.name);
-            if (newName && newName.trim()) {
-              const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, name: newName.trim() } : o);
-              objectsRef.current = updated;
-              setObjects(updated);
-              drawMap();
-              wsSendRef.current('objects:update', { objects: updated });
-            }
+            dialogPrompt('Rename Object', ctxObj.name).then(newName => {
+              if (newName && newName.trim()) {
+                const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, name: newName.trim() } : o);
+                objectsRef.current = updated;
+                setObjects(updated);
+                drawMap();
+                wsSendRef.current('objects:update', { objects: updated });
+              }
+            });
           }
           break;
         case 'bringToFront': {
@@ -2060,18 +2162,24 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
         case 'deleteObject':
           if (ctxObj) {
-            if (ctxObj.locked && !window.confirm(`"${ctxObj.name}" is locked. Delete anyway?`)) break;
-            const before = [...objectsRef.current];
-            const updated = objectsRef.current.filter(o => o.id !== ctxObj.id);
-            objectsRef.current = updated;
-            setObjects(updated);
-            setSelectedObjectId(null);
-            selectedObjectIdRef.current = null;
-            drawMap();
-            drawTop();
-            wsSendRef.current('objects:update', { objects: updated });
-            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
-            showNotif(`Deleted: ${ctxObj.name}`);
+            const doDeleteObj = () => {
+              const before = [...objectsRef.current];
+              const updated = objectsRef.current.filter(o => o.id !== ctxObj.id);
+              objectsRef.current = updated;
+              setObjects(updated);
+              setSelectedObjectId(null);
+              selectedObjectIdRef.current = null;
+              drawMap();
+              drawTop();
+              wsSendRef.current('objects:update', { objects: updated });
+              undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+              showNotif(`Deleted: ${ctxObj.name}`);
+            };
+            if (ctxObj.locked) {
+              dialogConfirm('Delete Locked Object', `"${ctxObj.name}" is locked. Delete anyway?`, true).then(ok => { if (ok) doDeleteObj(); });
+            } else {
+              doDeleteObj();
+            }
           }
           break;
       }
@@ -2181,16 +2289,16 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => {
     if (!gridMenuOpen) return;
     const close = () => setGridMenuOpen(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
   }, [gridMenuOpen]);
 
   // Close measure context menu on click-away
   useEffect(() => {
     if (!measureMenuOpen) return;
     const close = () => setMeasureMenuOpen(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
   }, [measureMenuOpen]);
 
   const handleObjectAdd = useCallback(
@@ -2398,13 +2506,11 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   }, [redrawAll]);
 
   const handleResetFog = useCallback(() => {
-    if (typeof window !== 'undefined' && !window.confirm('Reset all fog?')) return;
-    resetFog();
+    dialogConfirm('Reset Fog', 'Reset all fog? This covers the entire map.', true).then(ok => { if (ok) resetFog(); });
   }, [resetFog]);
 
   const handleRevealAllFog = useCallback(() => {
-    if (typeof window !== 'undefined' && !window.confirm('Reveal all fog?')) return;
-    revealAll();
+    dialogConfirm('Reveal All Fog', 'Reveal all fog? This will clear the entire map.', true).then(ok => { if (ok) revealAll(); });
   }, [revealAll]);
 
   // ── Drop map on canvas ──
@@ -3000,31 +3106,36 @@ function renderBox(
   c.save();
   c.globalAlpha = a;
 
-  if (b.points && b.points.length >= 3) {
-    // Polygon room
+  const buildPath = () => {
     c.beginPath();
-    c.moveTo(b.points[0].x, b.points[0].y);
-    for (let i = 1; i < b.points.length; i++) {
-      c.lineTo(b.points[i].x, b.points[i].y);
+    if (b.points && b.points.length >= 3) {
+      c.moveTo(b.points[0].x, b.points[0].y);
+      for (let i = 1; i < b.points.length; i++) c.lineTo(b.points[i].x, b.points[i].y);
+      c.closePath();
+    } else {
+      c.rect(b.x, b.y, b.w, b.h);
     }
-    c.closePath();
-    c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
-    c.fill();
-    c.strokeStyle = col;
-    c.lineWidth = (b.id === selectedBoxId ? 3 : 1.5) / scale;
-    if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
-    c.stroke();
-    c.setLineDash([]);
-  } else {
-    // Rectangle room (original behavior)
-    c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
-    c.fillRect(b.x, b.y, b.w, b.h);
-    c.strokeStyle = col;
-    c.lineWidth = (b.id === selectedBoxId ? 3 : 1.5) / scale;
-    if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
-    c.strokeRect(b.x, b.y, b.w, b.h);
-    c.setLineDash([]);
-  }
+  };
+
+  // Fill
+  buildPath();
+  c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
+  c.fill();
+
+  // Glow outline (wider, semi-transparent)
+  const lw = (b.id === selectedBoxId ? 4 : 2.5) / scale;
+  if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
+  buildPath();
+  c.strokeStyle = hexAlpha(col, 0.3);
+  c.lineWidth = lw + 3 / scale;
+  c.stroke();
+
+  // Main outline
+  buildPath();
+  c.strokeStyle = col;
+  c.lineWidth = lw;
+  c.stroke();
+  c.setLineDash([]);
 
   // Hazard hatching
   if (b.type === 'hazard' && !b.revealed) {
