@@ -2,11 +2,11 @@
 
 type ToolName = 'reveal' | 'hide' | 'gridReveal' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
 
-const BRUSH_SIZES = [
-  { radius: 15, dotSize: 8, key: '1' },
-  { radius: 36, dotSize: 13, key: '2' },
-  { radius: 70, dotSize: 19, key: '3' },
-  { radius: 130, dotSize: 26, key: '4' },
+const BRUSH_MULTIPLIERS = [
+  { mult: 1, label: 'S', dotSize: 8, key: '1' },
+  { mult: 2, label: 'M', dotSize: 13, key: '2' },
+  { mult: 4, label: 'L', dotSize: 19, key: '3' },
+  { mult: 8, label: 'XL', dotSize: 26, key: '4' },
 ];
 
 interface ToolbarProps {
@@ -14,6 +14,7 @@ interface ToolbarProps {
   onToolChange: (tool: ToolName) => void;
   brushRadius: number;
   onBrushChange: (radius: number) => void;
+  gridSize: number;
   showGrid: boolean;
   onToggleGrid: () => void;
   onResetFog: () => void;
@@ -22,6 +23,7 @@ interface ToolbarProps {
   onMeasureRightClick?: (e: React.MouseEvent) => void;
   snapToGrid?: boolean;
   onSnapToGridToggle?: () => void;
+  onShake?: () => void;
 }
 
 export default function Toolbar({
@@ -29,13 +31,19 @@ export default function Toolbar({
   onToolChange,
   brushRadius,
   onBrushChange,
+  gridSize,
   showGrid,
   onToggleGrid,
   onResetFog,
   onRevealAllFog,
   onGridRightClick,
   onMeasureRightClick,
+  onShake,
 }: ToolbarProps) {
+  const brushSizes = BRUSH_MULTIPLIERS.map(b => ({
+    ...b,
+    radius: Math.round(b.mult * gridSize / 2),
+  }));
   return (
     <div
       className="flex w-[62px] flex-shrink-0 flex-col items-center gap-px py-1.5"
@@ -84,12 +92,12 @@ export default function Toolbar({
       {/* Brush size group */}
       <ToolGroup label="Size">
         <div className="flex flex-col items-center gap-1">
-          {BRUSH_SIZES.map((b) => (
+          {brushSizes.map((b) => (
             <div
-              key={b.radius}
+              key={b.key}
               className="flex items-center justify-center cursor-pointer"
               onClick={() => onBrushChange(b.radius)}
-              title={`Brush size ${b.key} (Key: ${b.key})`}
+              title={`${b.label} — ${b.mult}× grid (Key: ${b.key})`}
             >
               <div
                 className="flex-shrink-0 rounded-full transition-all"
@@ -133,6 +141,14 @@ export default function Toolbar({
           active={activeTool === 'ping'}
           onClick={() => onToolChange('ping')}
         />
+        {onShake && (
+          <ToolBtn
+            icon={<ShakeIcon />}
+            label="Shake"
+            active={false}
+            onClick={onShake}
+          />
+        )}
       </ToolGroup>
 
       {/* View group */}
@@ -329,6 +345,14 @@ function GridRevealIcon() {
       <rect x="13" y="13" width="8" height="8" rx="0.5" />
       <circle cx="17" cy="17" r="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <path d="M14 17s1.2-2 3-2 3 2 3 2-1.2 2-3 2-3-2-3-2z" fill="none" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function ShakeIcon() {
+  return (
+    <svg {...svgProps}>
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
     </svg>
   );
 }

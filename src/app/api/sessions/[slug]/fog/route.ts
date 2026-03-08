@@ -170,5 +170,10 @@ export async function POST(
     broadcast(slug, { type: 'fog:style', payload: { style: body.fog_style } });
   }
 
+  // body.shake broadcasts a display shake event to players
+  if (body.shake) {
+    broadcast(slug, { type: 'display:shake', payload: { intensity: body.shake.intensity || 'medium' } });
+  }
+
   return NextResponse.json({ ok: true });
 }
