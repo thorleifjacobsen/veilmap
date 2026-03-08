@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import { db } from '@/lib/db';
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  trustHost: true,
   providers: [
     Credentials({
       name: 'credentials',
