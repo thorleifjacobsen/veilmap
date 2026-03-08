@@ -2,8 +2,9 @@ module.exports = {
   apps: [
     {
       name: 'veilmap',
-      script: 'node_modules/.bin/next',
-      args: 'start',
+      // Use the custom server (server.ts → dist/server.js) which includes
+      // both Next.js and the WebSocket upgrade handler on the same port.
+      script: 'dist/server.js',
       cwd: '/home/veilmap/app',
       instances: 1,
       exec_mode: 'fork',
