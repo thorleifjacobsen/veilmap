@@ -45,6 +45,12 @@ Enter a password when prompted, skip the rest of the fields.
 
 ---
 
+## Step 2.4 - Add veilmap to sudoers
+
+veilmap ALL=(ALL) NOPASSWD: /usr/bin/caddy, /bin/tee /etc/caddy/previews/*, /bin/rm /etc/caddy/previews/*
+
+---
+
 ## Step 3 — Firewall & fail2ban
 
 > Run as: **root**
