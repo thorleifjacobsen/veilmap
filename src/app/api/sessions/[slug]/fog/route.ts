@@ -35,6 +35,21 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
 ) {
+  return saveFogSnapshot(req, params);
+}
+
+// POST /api/sessions/[slug]/fog — same as PUT (used by navigator.sendBeacon on beforeunload)
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ slug: string }> }
+) {
+  return saveFogSnapshot(req, params);
+}
+
+async function saveFogSnapshot(
+  req: NextRequest,
+  params: Promise<{ slug: string }>
+) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { slug } = await params;

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { dialogConfirm } from '@/components/DialogModal';
 
 interface SessionSummary {
   id: string;
@@ -45,7 +46,7 @@ export default function DashboardPage() {
   };
 
   const deleteSession = async (slug: string) => {
-    if (!confirm('Delete this session? This cannot be undone.')) return;
+    if (!(await dialogConfirm('Delete Session', 'Delete this session? This cannot be undone.', true))) return;
     await fetch(`/api/sessions/${slug}`, { method: 'DELETE' });
     setSessions(prev => prev.filter(s => s.slug !== slug));
   };

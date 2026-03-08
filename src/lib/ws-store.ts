@@ -106,7 +106,7 @@ function getState(slug: string): SessionState {
   return state.get(slug)!;
 }
 
-export function setFogState(slug: string, png: string) {
+export function setFogState(slug: string, png: string | null) {
   getState(slug).fogPng = png;
 }
 

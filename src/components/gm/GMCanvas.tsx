@@ -38,6 +38,7 @@ import SettingsModal from './SettingsModal';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
 import { renderAnimatedFogGM } from '@/lib/animated-fog';
 import { useSessionWS } from '@/hooks/useSessionWS';
+import { dialogConfirm, dialogPrompt } from '@/components/DialogModal';
 
 // ── Types ──
 
@@ -85,8 +86,12 @@ const TYPE_COLORS: Record<string, string> = {
   autoReveal: '#c8963e', trigger: '#a080e0', hazard: '#e05c2a', note: '#5aba6a', hidden: '#555',
 };
 const MAX_UNDO = 50;
-const POLYGON_SNAP_DISTANCE = 15; // px — how close to first vertex to close a polygon
+const POLYGON_SNAP_DISTANCE = 8; // px — how close to first vertex to close a polygon
 const MIN_OBJECT_SIZE = 4; // px — minimum object width/height when resizing
+const ROTATION_HANDLE_OFFSET = 30; // px — distance from object top to rotation handle
+const ROTATION_HANDLE_RADIUS = 6; // px — visual radius of the rotation handle circle
+const ROTATION_HANDLE_HIT_RADIUS = 10; // px — hit area radius for rotation handle
+const ROTATION_SNAP_DEGREES = 15; // degrees — snap increment when Shift is held during rotation
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
   box: 'Click to place polygon vertices (Shift=snap), click near first to close',
   select: 'Click to select · Drag to resize · Hold Shift for free scale',
@@ -193,6 +198,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const cameraThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const objectThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fogSnapshotTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fogDirtyRef = useRef(false);
   const toolRef = useRef<ToolName>('reveal');
   const boxesRef = useRef<Box[]>(session.boxes || []);
   const objectsRef = useRef<MapObject[]>(session.objects || []);
@@ -220,6 +226,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const selectedObjectIdRef = useRef<string | null>(null);
   const objectDragRef = useRef<{ objId: string; offsetX: number; offsetY: number } | null>(null);
   const objectResizeRef = useRef<{ objId: string; corner: string; startX: number; startY: number; origObj: MapObject } | null>(null);
+  const objectRotateRef = useRef<{ objId: string; startAngle: number; origRotation: number } | null>(null);
   const objectUndoBeforeRef = useRef<MapObject | null>(null);
   const snapToGridRef = useRef(false);
   const gridDrawStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -238,6 +245,18 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { blackoutActiveRef.current = blackoutActive; }, [blackoutActive]);
   useEffect(() => { selectedObjectIdRef.current = selectedObjectId; }, [selectedObjectId]);
   useEffect(() => { snapToGridRef.current = snapToGrid; }, [snapToGrid]);
+
+  // ── Viewport persistence (localStorage per session slug) ──
+  const vpSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveViewport = useCallback(() => {
+    if (vpSaveTimerRef.current) clearTimeout(vpSaveTimerRef.current);
+    vpSaveTimerRef.current = setTimeout(() => {
+      try {
+        const { x, y, scale } = vpRef.current;
+        localStorage.setItem(`veilmap-vp-${slug}`, JSON.stringify({ x, y, scale }));
+      } catch { /* localStorage full or unavailable */ }
+    }, 300);
+  }, [slug]);
 
   // ── Notification ──
   const notifTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -288,6 +307,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     const fc = fogCanvasRef.current;
     if (!fc) return;
     const png = await fogToBase64(fc);
+    fogDirtyRef.current = false;
     // Send via WS — server persists to DB and broadcasts to players
     wsSendRef.current('fog:snapshot', { png });
   }, []);
@@ -635,8 +655,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         ctx.save();
         applyViewport(ctx, vp);
         if (obj.locked) {
-          // Locked: dashed gray outline, no resize handles
-          ctx.strokeStyle = 'rgba(180,180,180,.5)';
+          // Locked: dashed orange outline, no resize handles
+          ctx.strokeStyle = 'rgba(224,150,50,.7)';
           ctx.lineWidth = 2 / vp.scale;
           ctx.setLineDash([6 / vp.scale, 4 / vp.scale]);
           ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
@@ -660,6 +680,36 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           [[obj.x + obj.w / 2, obj.y], [obj.x + obj.w / 2, obj.y + obj.h], [obj.x, obj.y + obj.h / 2], [obj.x + obj.w, obj.y + obj.h / 2]].forEach(([cx, cy]) => {
             ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
           });
+          // Rotation handle — circle above top center
+          const rotHandleY = obj.y - ROTATION_HANDLE_OFFSET / vp.scale;
+          const rotHandleCx = obj.x + obj.w / 2;
+          // Stem line
+          ctx.strokeStyle = 'rgba(0,180,255,.5)';
+          ctx.lineWidth = 1.5 / vp.scale;
+          ctx.beginPath();
+          ctx.moveTo(rotHandleCx, obj.y);
+          ctx.lineTo(rotHandleCx, rotHandleY);
+          ctx.stroke();
+          // Circle
+          const rr = ROTATION_HANDLE_RADIUS / vp.scale;
+          ctx.fillStyle = 'rgba(0,180,255,.9)';
+          ctx.beginPath();
+          ctx.arc(rotHandleCx, rotHandleY, rr, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1.2 / vp.scale;
+          ctx.stroke();
+        }
+
+        // Show rotation angle while rotating
+        if (objectRotateRef.current && objectRotateRef.current.objId === obj.id) {
+          const deg = Math.round(obj.rotation || 0);
+          const fontSize = Math.max(11, 14 / vp.scale);
+          ctx.font = `bold ${fontSize}px Cinzel,serif`;
+          ctx.fillStyle = '#fff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(`${deg}°`, obj.x + obj.w / 2, obj.y - (ROTATION_HANDLE_OFFSET + ROTATION_HANDLE_RADIUS) / vp.scale);
         }
         ctx.restore();
       }
@@ -775,6 +825,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const ctx = fogCanvas.getContext('2d')!;
         ctx.clearRect(0, 0, MAP_W, MAP_H);
         ctx.drawImage(entry.fogBefore, 0, 0);
+        fogDirtyRef.current = true;
         composeFogGM();
         // Immediately push fog snapshot to player display
         sendFogSnapshot();
@@ -827,6 +878,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const doRevealBox = useCallback(
     (box: Box) => {
       if (box.revealed) return;
+      fogDirtyRef.current = true;
       const fogSnap = snapFog();
       const beforeBoxes = [...boxesRef.current];
       const fogCanvas = fogCanvasRef.current;
@@ -856,6 +908,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const doHideBox = useCallback(
     (box: Box) => {
+      fogDirtyRef.current = true;
       const fogSnap = snapFog();
       const beforeBoxes = [...boxesRef.current];
       const fogCanvas = fogCanvasRef.current;
@@ -871,11 +924,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       composeFogGM();
       redrawBoxes();
       apiBoxUpdate({ ...box, revealed: false });
+      sendFogSnapshot();
       if (fogSnap) {
         pushUndoEntry({ type: 'box-hide', label: `${box.name} hidden`, fogBefore: fogSnap, boxesBefore: beforeBoxes, boxesAfter: [...updatedBoxes] });
       }
     },
-    [snapFog, pushUndoEntry, composeFogGM, redrawBoxes, apiBoxUpdate],
+    [snapFog, pushUndoEntry, composeFogGM, redrawBoxes, apiBoxUpdate, sendFogSnapshot],
   );
 
   const paintFog = useCallback(
@@ -940,6 +994,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const resetFog = useCallback(() => {
     pushUndo();
+    fogDirtyRef.current = true;
     const fogCanvas = fogCanvasRef.current;
     if (!fogCanvas) return;
     const ctx = fogCanvas.getContext('2d')!;
@@ -958,6 +1013,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const revealAll = useCallback(() => {
     pushUndo();
+    fogDirtyRef.current = true;
     const fogCanvas = fogCanvasRef.current;
     if (!fogCanvas) return;
     const ctx = fogCanvas.getContext('2d')!;
@@ -1133,7 +1189,25 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
     const w = wrapRef.current;
     if (w) {
-      vpRef.current = fitToContainer(MAP_W, MAP_H, w.offsetWidth, w.offsetHeight);
+      // Restore saved viewport from localStorage, or fall back to fit-to-screen
+      let restored = false;
+      try {
+        const saved = localStorage.getItem(`veilmap-vp-${slug}`);
+        if (saved) {
+          const vp = JSON.parse(saved);
+          if (
+            typeof vp.x === 'number' && typeof vp.y === 'number' && typeof vp.scale === 'number' &&
+            vp.scale >= 0.05 && vp.scale <= 20 &&
+            Math.abs(vp.x) < MAP_W * 10 && Math.abs(vp.y) < MAP_H * 10
+          ) {
+            vpRef.current = { x: vp.x, y: vp.y, scale: vp.scale };
+            restored = true;
+          }
+        }
+      } catch { /* ignore parse errors */ }
+      if (!restored) {
+        vpRef.current = fitToContainer(MAP_W, MAP_H, w.offsetWidth, w.offsetHeight);
+      }
       setZoomPercent(Math.round(vpRef.current.scale * 100));
     }
 
@@ -1142,8 +1216,26 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     const onResize = () => setTimeout(resize, 60);
     window.addEventListener('resize', onResize);
 
-    // Periodic fog snapshot (every 10s)
-    fogSnapshotTimerRef.current = setInterval(sendFogSnapshot, 10000);
+    // Periodic fog snapshot (every 10s, only if fog has changed)
+    fogSnapshotTimerRef.current = setInterval(() => {
+      if (fogDirtyRef.current) sendFogSnapshot();
+    }, 10000);
+
+    // Save fog snapshot when tab is closed or navigated away
+    const onBeforeUnload = () => {
+      if (!fogDirtyRef.current) return;
+      const fc = fogCanvasRef.current;
+      if (!fc) return;
+      // Synchronous base64 encoding for beforeunload
+      const png = fc.toDataURL('image/png').split(',')[1];
+      fogDirtyRef.current = false;
+      // Use sendBeacon (POST) for reliable delivery during page unload
+      const blob = new Blob([JSON.stringify({ png })], { type: 'application/json' });
+      const sent = navigator.sendBeacon(`/api/sessions/${slug}/fog`, blob);
+      // Fallback to WS if sendBeacon fails (e.g. payload too large)
+      if (!sent) wsSendRef.current('fog:snapshot', { png });
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
 
     // Broadcast DB-stored camera on mount so player gets it immediately
     if (session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null) {
@@ -1160,7 +1252,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
     return () => {
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('beforeunload', onBeforeUnload);
       if (fogSnapshotTimerRef.current) clearInterval(fogSnapshotTimerRef.current);
+      if (vpSaveTimerRef.current) clearTimeout(vpSaveTimerRef.current);
       sendFogSnapshot();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1317,20 +1411,24 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         if (selId) {
           const obj = objectsRef.current.find(o => o.id === selId);
           if (obj) {
+            const doDelete = () => {
+              const before = [...objectsRef.current];
+              const updated = objectsRef.current.filter(o => o.id !== selId);
+              objectsRef.current = updated;
+              setObjects(updated);
+              setSelectedObjectId(null);
+              selectedObjectIdRef.current = null;
+              drawMap();
+              drawTop();
+              wsSendRef.current('objects:update', { objects: updated });
+              undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+              showNotif(`Deleted: ${obj.name}`);
+            };
             if (obj.locked) {
-              if (!window.confirm(`"${obj.name}" is locked. Delete anyway?`)) return;
+              dialogConfirm('Delete Locked Object', `"${obj.name}" is locked. Delete anyway?`, true).then(ok => { if (ok) doDelete(); });
+            } else {
+              doDelete();
             }
-            const before = [...objectsRef.current];
-            const updated = objectsRef.current.filter(o => o.id !== selId);
-            objectsRef.current = updated;
-            setObjects(updated);
-            setSelectedObjectId(null);
-            selectedObjectIdRef.current = null;
-            drawMap();
-            drawTop();
-            wsSendRef.current('objects:update', { objects: updated });
-            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
-            showNotif(`Deleted: ${obj.name}`);
           }
         }
       }
@@ -1361,6 +1459,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         vpRef.current = zoomAt(vpRef.current, cx, cy, 1.15);
         setZoomPercent(Math.round(vpRef.current.scale * 100));
         redrawAll();
+        saveViewport();
       }
       if (e.key === '-') {
         const wrap = wrapRef.current;
@@ -1369,6 +1468,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         vpRef.current = zoomAt(vpRef.current, cx, cy, 0.87);
         setZoomPercent(Math.round(vpRef.current.scale * 100));
         redrawAll();
+        saveViewport();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -1398,6 +1498,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   const handleMouseDown = useCallback(
     (e: ReactMouseEvent) => {
+      // Close any open context menu on any canvas click
+      setContextMenu((prev) => prev.open ? { ...prev, open: false } : prev);
+
       // Middle click or space+left → pan
       if (e.button === 1 || (e.button === 0 && spaceHeldRef.current)) {
         panningRef.current = true;
@@ -1463,8 +1566,22 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       // Object selection, drag, and resize
       if (toolRef.current === 'select') {
         const selObj = selectedObjectIdRef.current ? objectsRef.current.find(o => o.id === selectedObjectIdRef.current) : null;
+        if (selObj && !selObj.locked) {
+          // Check rotation handle first (circle above top center)
+          const rotHandleX = selObj.x + selObj.w / 2;
+          const rotHandleY = selObj.y - ROTATION_HANDLE_OFFSET / vpRef.current.scale;
+          const rotHitR = ROTATION_HANDLE_HIT_RADIUS / vpRef.current.scale;
+          if (Math.hypot(mp.x - rotHandleX, mp.y - rotHandleY) < rotHitR) {
+            const centerX = selObj.x + selObj.w / 2;
+            const centerY = selObj.y + selObj.h / 2;
+            const startAngle = Math.atan2(mp.y - centerY, mp.x - centerX) * 180 / Math.PI;
+            objectRotateRef.current = { objId: selObj.id, startAngle, origRotation: selObj.rotation || 0 };
+            objectUndoBeforeRef.current = { ...selObj };
+            return;
+          }
+        }
         if (selObj) {
-          const hs = 14 / vpRef.current.scale;
+          const hs = 8 / vpRef.current.scale;
           const corners = [
             { corner: 'tl', x: selObj.x, y: selObj.y },
             { corner: 'tr', x: selObj.x + selObj.w, y: selObj.y },
@@ -1535,6 +1652,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           paintUndoPushedRef.current = true;
         }
         paintingRef.current = true;
+        fogDirtyRef.current = true;
         lastPaintPosRef.current = { x: mp.x, y: mp.y };
         paintFog(mp.x, mp.y, toolRef.current);
       }
@@ -1544,6 +1662,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           paintUndoPushedRef.current = true;
         }
         paintingRef.current = true;
+        fogDirtyRef.current = true;
         gridRevealCellsRef.current.clear();
         paintGridRevealCell(mp.x, mp.y);
       }
@@ -1568,6 +1687,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           ? clampViewport(newVp, MAP_W, MAP_H, wrap.offsetWidth, wrap.offsetHeight)
           : newVp;
         redrawAll();
+        saveViewport();
         return;
       }
 
@@ -1651,6 +1771,36 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             objectThrottleRef.current = null;
             broadcastObjects(objectsRef.current);
           }, 150);
+        }
+        return;
+      }
+      if (objectRotateRef.current) {
+        const rot = objectRotateRef.current;
+        const obj = objectsRef.current.find(o => o.id === rot.objId);
+        if (obj) {
+          const centerX = obj.x + obj.w / 2;
+          const centerY = obj.y + obj.h / 2;
+          const currentAngle = Math.atan2(mp.y - centerY, mp.x - centerX) * 180 / Math.PI;
+          let newRotation = rot.origRotation + (currentAngle - rot.startAngle);
+          // Shift held: snap to 15° increments
+          if (shiftHeldRef.current) {
+            newRotation = Math.round(newRotation / ROTATION_SNAP_DEGREES) * ROTATION_SNAP_DEGREES;
+          }
+          // Normalize to 0-360
+          newRotation = ((newRotation % 360) + 360) % 360;
+          const updated = objectsRef.current.map(o =>
+            o.id === rot.objId ? { ...o, rotation: newRotation } : o
+          );
+          objectsRef.current = updated;
+          setObjects(updated);
+          drawMap();
+          drawTop();
+          if (!objectThrottleRef.current) {
+            objectThrottleRef.current = setTimeout(() => {
+              objectThrottleRef.current = null;
+              broadcastObjects(objectsRef.current);
+            }, 150);
+          }
         }
         return;
       }
@@ -1785,6 +1935,24 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         wsSendRef.current('objects:update', { objects: objectsRef.current });
         return;
       }
+      if (objectRotateRef.current) {
+        const rotateObjId = objectRotateRef.current.objId;
+        objectRotateRef.current = null;
+        if (objectUndoBeforeRef.current) {
+          const afterObj = objectsRef.current.find(o => o.id === rotateObjId);
+          if (afterObj) {
+            pushUndoEntry({
+              type: 'object-rotate',
+              label: 'object rotated',
+              objectsBefore: objectsRef.current.map(o => o.id === rotateObjId ? objectUndoBeforeRef.current! : o),
+              objectsAfter: [...objectsRef.current],
+            });
+          }
+          objectUndoBeforeRef.current = null;
+        }
+        wsSendRef.current('objects:update', { objects: objectsRef.current });
+        return;
+      }
       const { sx, sy } = getCanvasPos(e);
       const mp = screenToMap(sx, sy, vpRef.current);
 
@@ -1871,6 +2039,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     cameraDragRef.current = null;
     objectDragRef.current = null;
     objectResizeRef.current = null;
+    objectRotateRef.current = null;
     if (paintingRef.current) {
       paintingRef.current = false;
       paintUndoPushedRef.current = false;
@@ -1891,8 +2060,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       vpRef.current = zoomAt(vpRef.current, sx, sy, factor);
       setZoomPercent(Math.round(vpRef.current.scale * 100));
       redrawAll();
+      saveViewport();
     },
-    [redrawAll],
+    [redrawAll, saveViewport],
   );
 
   // Register wheel handler as non-passive to allow preventDefault
@@ -1917,6 +2087,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         if (!obj.visible) return false;
         return mp.x >= obj.x && mp.x <= obj.x + obj.w && mp.y >= obj.y && mp.y <= obj.y + obj.h;
       }) || null;
+      // Right-click selects the object (same as left-click)
+      if (clickedObject) {
+        setSelectedObjectId(clickedObject.id);
+        selectedObjectIdRef.current = clickedObject.id;
+        drawTop();
+      }
       setContextMenu({
         open: true,
         x: e.clientX,
@@ -1928,7 +2104,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         object: clickedObject,
       });
     },
-    [getCanvasPos],
+    [getCanvasPos, drawTop],
   );
 
   // ── Context menu actions ──
@@ -1940,11 +2116,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       switch (action) {
         case 'reveal':
           pushUndo();
+          fogDirtyRef.current = true;
           paintFog(mapX, mapY, 'reveal');
+          sendFogSnapshot();
           break;
         case 'hide':
           pushUndo();
+          fogDirtyRef.current = true;
           paintFog(mapX, mapY, 'hide');
+          sendFogSnapshot();
           break;
         case 'ping':
           addPing(mapX, mapY);
@@ -1978,14 +2158,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
         case 'renameObject':
           if (ctxObj) {
-            const newName = window.prompt('Rename object:', ctxObj.name);
-            if (newName && newName.trim()) {
-              const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, name: newName.trim() } : o);
-              objectsRef.current = updated;
-              setObjects(updated);
-              drawMap();
-              wsSendRef.current('objects:update', { objects: updated });
-            }
+            dialogPrompt('Rename Object', ctxObj.name).then(newName => {
+              if (newName && newName.trim()) {
+                const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, name: newName.trim() } : o);
+                objectsRef.current = updated;
+                setObjects(updated);
+                drawMap();
+                wsSendRef.current('objects:update', { objects: updated });
+              }
+            });
           }
           break;
         case 'bringToFront': {
@@ -2060,23 +2241,29 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
         case 'deleteObject':
           if (ctxObj) {
-            if (ctxObj.locked && !window.confirm(`"${ctxObj.name}" is locked. Delete anyway?`)) break;
-            const before = [...objectsRef.current];
-            const updated = objectsRef.current.filter(o => o.id !== ctxObj.id);
-            objectsRef.current = updated;
-            setObjects(updated);
-            setSelectedObjectId(null);
-            selectedObjectIdRef.current = null;
-            drawMap();
-            drawTop();
-            wsSendRef.current('objects:update', { objects: updated });
-            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
-            showNotif(`Deleted: ${ctxObj.name}`);
+            const doDeleteObj = () => {
+              const before = [...objectsRef.current];
+              const updated = objectsRef.current.filter(o => o.id !== ctxObj.id);
+              objectsRef.current = updated;
+              setObjects(updated);
+              setSelectedObjectId(null);
+              selectedObjectIdRef.current = null;
+              drawMap();
+              drawTop();
+              wsSendRef.current('objects:update', { objects: updated });
+              undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+              showNotif(`Deleted: ${ctxObj.name}`);
+            };
+            if (ctxObj.locked) {
+              dialogConfirm('Delete Locked Object', `"${ctxObj.name}" is locked. Delete anyway?`, true).then(ok => { if (ok) doDeleteObj(); });
+            } else {
+              doDeleteObj();
+            }
           }
           break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, duplicateObject],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, duplicateObject, sendFogSnapshot],
   );
 
   // ── Box editor callbacks ──
@@ -2181,16 +2368,16 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => {
     if (!gridMenuOpen) return;
     const close = () => setGridMenuOpen(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
   }, [gridMenuOpen]);
 
   // Close measure context menu on click-away
   useEffect(() => {
     if (!measureMenuOpen) return;
     const close = () => setMeasureMenuOpen(null);
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
   }, [measureMenuOpen]);
 
   const handleObjectAdd = useCallback(
@@ -2395,16 +2582,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     vpRef.current = fitToContainer(MAP_W, MAP_H, w.offsetWidth, w.offsetHeight);
     setZoomPercent(Math.round(vpRef.current.scale * 100));
     redrawAll();
-  }, [redrawAll]);
+    saveViewport();
+  }, [redrawAll, saveViewport]);
 
   const handleResetFog = useCallback(() => {
-    if (typeof window !== 'undefined' && !window.confirm('Reset all fog?')) return;
-    resetFog();
+    dialogConfirm('Reset Fog', 'Reset all fog? This covers the entire map.', true).then(ok => { if (ok) resetFog(); });
   }, [resetFog]);
 
   const handleRevealAllFog = useCallback(() => {
-    if (typeof window !== 'undefined' && !window.confirm('Reveal all fog?')) return;
-    revealAll();
+    dialogConfirm('Reveal All Fog', 'Reveal all fog? This will clear the entire map.', true).then(ok => { if (ok) revealAll(); });
   }, [revealAll]);
 
   // ── Drop map on canvas ──
@@ -2788,6 +2974,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                   vpRef.current = zoomAt(vpRef.current, cx, cy, factor);
                   setZoomPercent(Math.round(vpRef.current.scale * 100));
                   redrawAll();
+                  saveViewport();
                 }}
                 className="h-48 w-3 appearance-none rounded-full"
                 style={{
@@ -2807,6 +2994,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                     vpRef.current = fitToContainer(MAP_W, MAP_H, wrap.offsetWidth, wrap.offsetHeight);
                     setZoomPercent(Math.round(vpRef.current.scale * 100));
                     redrawAll();
+                    saveViewport();
                   }}
                 >
                   Fit
@@ -3000,31 +3188,36 @@ function renderBox(
   c.save();
   c.globalAlpha = a;
 
-  if (b.points && b.points.length >= 3) {
-    // Polygon room
+  const buildPath = () => {
     c.beginPath();
-    c.moveTo(b.points[0].x, b.points[0].y);
-    for (let i = 1; i < b.points.length; i++) {
-      c.lineTo(b.points[i].x, b.points[i].y);
+    if (b.points && b.points.length >= 3) {
+      c.moveTo(b.points[0].x, b.points[0].y);
+      for (let i = 1; i < b.points.length; i++) c.lineTo(b.points[i].x, b.points[i].y);
+      c.closePath();
+    } else {
+      c.rect(b.x, b.y, b.w, b.h);
     }
-    c.closePath();
-    c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
-    c.fill();
-    c.strokeStyle = col;
-    c.lineWidth = (b.id === selectedBoxId ? 3 : 1.5) / scale;
-    if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
-    c.stroke();
-    c.setLineDash([]);
-  } else {
-    // Rectangle room (original behavior)
-    c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
-    c.fillRect(b.x, b.y, b.w, b.h);
-    c.strokeStyle = col;
-    c.lineWidth = (b.id === selectedBoxId ? 3 : 1.5) / scale;
-    if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
-    c.strokeRect(b.x, b.y, b.w, b.h);
-    c.setLineDash([]);
-  }
+  };
+
+  // Fill
+  buildPath();
+  c.fillStyle = hexAlpha(col, b.revealed ? 0.03 : 0.06);
+  c.fill();
+
+  // Glow outline (wider, semi-transparent)
+  const lw = (b.id === selectedBoxId ? 4 : 2.5) / scale;
+  if (!b.revealed) c.setLineDash([8 / scale, 4 / scale]);
+  buildPath();
+  c.strokeStyle = hexAlpha(col, 0.3);
+  c.lineWidth = lw + 3 / scale;
+  c.stroke();
+
+  // Main outline
+  buildPath();
+  c.strokeStyle = col;
+  c.lineWidth = lw;
+  c.stroke();
+  c.setLineDash([]);
 
   // Hazard hatching
   if (b.type === 'hazard' && !b.revealed) {

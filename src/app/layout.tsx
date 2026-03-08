@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import DialogModal from "@/components/DialogModal";
 
 export const metadata: Metadata = {
   title: "VeilMap — Fog of War for Tabletop RPGs",
@@ -15,6 +16,7 @@ export default function RootLayout({
     <html lang="en" className="h-full">
       <body className="antialiased h-full overflow-hidden">
         {children}
+        <DialogModal />
       </body>
     </html>
   );

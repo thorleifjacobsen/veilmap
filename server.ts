@@ -278,10 +278,14 @@ function handleGMEvent(slug: string, _ws: WebSocket, event: WSEvent) {
     }
 
     case 'fog:reset':
+      // Clear in-memory fog so reconnecting clients start fresh
+      setFogState(slug, null);
       broadcastPlayers(slug, event);
       break;
 
     case 'fog:revealall':
+      // Clear in-memory fog so reconnecting clients start fresh
+      setFogState(slug, null);
       broadcastPlayers(slug, event);
       break;
 
