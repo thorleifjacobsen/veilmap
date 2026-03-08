@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback } from 'react';
-import type { Box } from '@/types';
+import type { Box, MapObject } from '@/types';
 
 export interface ContextMenuState {
   open: boolean;
@@ -11,6 +11,7 @@ export interface ContextMenuState {
   mapY: number;
   box: Box | null;
   token: null;
+  object: MapObject | null;
 }
 
 interface ContextMenuProps {
@@ -32,15 +33,21 @@ export default function ContextMenu({ state, onClose, onAction }: ContextMenuPro
   useEffect(() => {
     if (state.open) {
       document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
+      const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+      document.addEventListener('keydown', handleEscape);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside);
+        document.removeEventListener('keydown', handleEscape);
+      };
     }
-  }, [state.open, handleClickOutside]);
+  }, [state.open, handleClickOutside, onClose]);
 
   if (!state.open) return null;
 
   const left = Math.min(state.x, window.innerWidth - 200);
-  const top = Math.min(state.y, window.innerHeight - 320);
+  const top = Math.min(state.y, window.innerHeight - 380);
   const hasBox = !!state.box;
+  const hasObject = !!state.object;
 
   return (
     <div
@@ -53,40 +60,86 @@ export default function ContextMenu({ state, onClose, onAction }: ContextMenuPro
         border: '1px solid rgba(200,150,62,.45)',
       }}
     >
-      <div
-        className="px-2 pt-1 pb-0.5 text-[.5rem] uppercase tracking-[.1em]"
-        style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
-      >
-        {hasBox ? `Box: ${state.box!.name}` : 'Canvas'}
-      </div>
-
-      <CxItem icon="eye" label="Reveal here" shortcut="R" onClick={() => onAction('reveal')} />
-      <CxItem icon="eyeOff" label="Hide here" shortcut="H" onClick={() => onAction('hide')} />
-
-      <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
-
-      <CxItem icon="ping" label="Ping location" shortcut="P" onClick={() => onAction('ping')} />
-
-      {hasBox && (
+      {hasObject ? (
         <>
-          <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
           <div
             className="px-2 pt-1 pb-0.5 text-[.5rem] uppercase tracking-[.1em]"
             style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
           >
-            Box
+            Object: {state.object!.name}
           </div>
-          {!state.box!.revealed && (
-            <CxItem icon="eye" label="Reveal room" onClick={() => onAction('revealBox')} />
+
+          <CxItem icon="copy" label="Duplicate" shortcut="Ctrl+D" onClick={() => onAction('duplicateObject')} />
+          <CxItem icon="edit" label="Rename" onClick={() => onAction('renameObject')} />
+
+          <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
+
+          <CxItem icon="arrowUp" label="Bring to Front" onClick={() => onAction('bringToFront')} />
+          <CxItem icon="arrowDown" label="Send to Back" onClick={() => onAction('sendToBack')} />
+          <CxItem icon="arrowUp" label="Move Up" onClick={() => onAction('moveObjectUp')} />
+          <CxItem icon="arrowDown" label="Move Down" onClick={() => onAction('moveObjectDown')} />
+
+          <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
+
+          <CxItem
+            icon={state.object!.locked ? 'unlock' : 'lock'}
+            label={state.object!.locked ? 'Unlock' : 'Lock'}
+            onClick={() => onAction('toggleLock')}
+          />
+          <CxItem
+            icon="eye"
+            label="Visible to GM"
+            checked={state.object!.visible}
+            onClick={() => onAction('toggleGmVisible')}
+          />
+          <CxItem
+            icon="eye"
+            label="Visible to Players"
+            checked={state.object!.playerVisible}
+            onClick={() => onAction('togglePlayerVisible')}
+          />
+
+          <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
+
+          <CxItem icon="delete" label="Delete" red onClick={() => onAction('deleteObject')} />
+        </>
+      ) : (
+        <>
+          <div
+            className="px-2 pt-1 pb-0.5 text-[.5rem] uppercase tracking-[.1em]"
+            style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
+          >
+            {hasBox ? `Box: ${state.box!.name}` : 'Canvas'}
+          </div>
+
+          <CxItem icon="eye" label="Reveal here" shortcut="R" onClick={() => onAction('reveal')} />
+          <CxItem icon="eyeOff" label="Hide here" shortcut="H" onClick={() => onAction('hide')} />
+
+          <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
+
+          <CxItem icon="ping" label="Ping location" shortcut="P" onClick={() => onAction('ping')} />
+
+          {hasBox && (
+            <>
+              <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
+              <div
+                className="px-2 pt-1 pb-0.5 text-[.5rem] uppercase tracking-[.1em]"
+                style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}
+              >
+                Box
+              </div>
+              {!state.box!.revealed && (
+                <CxItem icon="eye" label="Reveal room" onClick={() => onAction('revealBox')} />
+              )}
+              {state.box!.revealed && (
+                <CxItem icon="eyeOff" label="Hide room" onClick={() => onAction('hideBox')} />
+              )}
+              <CxItem icon="edit" label="Edit box…" onClick={() => onAction('editBox')} />
+              <CxItem icon="delete" label="Delete box" red onClick={() => onAction('deleteBox')} />
+            </>
           )}
-          {state.box!.revealed && (
-            <CxItem icon="eyeOff" label="Hide room" onClick={() => onAction('hideBox')} />
-          )}
-          <CxItem icon="edit" label="Edit box…" onClick={() => onAction('editBox')} />
-          <CxItem icon="delete" label="Delete box" red onClick={() => onAction('deleteBox')} />
         </>
       )}
-
     </div>
   );
 }
@@ -96,12 +149,14 @@ function CxItem({
   label,
   shortcut,
   red,
+  checked,
   onClick,
 }: {
   icon: string;
   label: string;
   shortcut?: string;
   red?: boolean;
+  checked?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -124,6 +179,11 @@ function CxItem({
       onClick={onClick}
     >
       <CxIcon type={icon} />
+      {checked !== undefined && (
+        <span style={{ color: checked ? '#c8963e' : 'rgba(212,196,160,.3)', fontSize: '.7rem' }}>
+          {checked ? '✓' : '○'}
+        </span>
+      )}
       {label}
       {shortcut && (
         <span
@@ -175,6 +235,41 @@ function CxIcon({ type }: { type: string }) {
         <svg {...props}>
           <polyline points="3 6 5 6 21 6" />
           <path d="M19 6l-1 14H6L5 6" />
+        </svg>
+      );
+    case 'copy':
+      return (
+        <svg {...props}>
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+        </svg>
+      );
+    case 'arrowUp':
+      return (
+        <svg {...props}>
+          <line x1="12" y1="19" x2="12" y2="5" />
+          <polyline points="5 12 12 5 19 12" />
+        </svg>
+      );
+    case 'arrowDown':
+      return (
+        <svg {...props}>
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <polyline points="19 12 12 19 5 12" />
+        </svg>
+      );
+    case 'lock':
+      return (
+        <svg {...props}>
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 0110 0v4" />
+        </svg>
+      );
+    case 'unlock':
+      return (
+        <svg {...props}>
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 019.9-1" />
         </svg>
       );
     default:

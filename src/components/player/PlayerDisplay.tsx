@@ -30,6 +30,10 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const [playerObjects, setPlayerObjects] = useState<MapObject[]>([]);
   const [htmlVpTransform, setHtmlVpTransform] = useState('translate(0px,0px) scale(1)');
   const [clipStyle, setClipStyle] = useState<React.CSSProperties>({});
+  const [shaking, setShaking] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFsBtn, setShowFsBtn] = useState(true);
+  const fsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initialize fog canvas
   useEffect(() => {
@@ -391,6 +395,11 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           fogStyleRef.current = (p.style === 'animated') ? 'animated' : 'solid';
           break;
         }
+        case 'display:shake': {
+          setShaking(true);
+          setTimeout(() => setShaking(false), 600);
+          break;
+        }
       }
     }
 
@@ -414,12 +423,64 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
+  // Fullscreen toggle
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }, []);
+
+  // Track fullscreen state
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  // Auto-hide fullscreen button after 3s of no mouse movement
+  useEffect(() => {
+    const onMouseMove = () => {
+      setShowFsBtn(true);
+      if (fsTimerRef.current) clearTimeout(fsTimerRef.current);
+      fsTimerRef.current = setTimeout(() => setShowFsBtn(false), 3000);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    // Start the timer
+    fsTimerRef.current = setTimeout(() => setShowFsBtn(false), 3000);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      if (fsTimerRef.current) clearTimeout(fsTimerRef.current);
+    };
+  }, []);
+
   if (prepMode) {
     return <PrepScreen message={prepMessage} />;
   }
 
   return (
-    <div ref={containerRef} className="fixed inset-0 bg-black" onContextMenu={(e) => e.preventDefault()}>
+    <div
+      ref={containerRef}
+      className="fixed inset-0 bg-black"
+      onContextMenu={(e) => e.preventDefault()}
+      style={shaking ? {
+        animation: 'veilmap-shake 600ms ease-out',
+      } : undefined}
+    >
+      {/* Shake keyframes (injected once) */}
+      <style>{`
+        @keyframes veilmap-shake {
+          0% { transform: translate(0, 0) rotate(0deg); }
+          10% { transform: translate(-6px, -3px) rotate(-0.5deg); }
+          20% { transform: translate(5px, 4px) rotate(0.5deg); }
+          30% { transform: translate(-4px, 2px) rotate(-0.3deg); }
+          40% { transform: translate(3px, -3px) rotate(0.3deg); }
+          50% { transform: translate(-2px, 1px) rotate(-0.2deg); }
+          60% { transform: translate(1px, -1px) rotate(0.1deg); }
+          100% { transform: translate(0, 0) rotate(0deg); }
+        }
+      `}</style>
       {/* Background canvas — map image only */}
       <canvas ref={canvasBgRef} className="absolute inset-0 w-full h-full block" style={{ zIndex: 1 }} />
       {/* HTML object layer — GIFs animate naturally */}
@@ -488,6 +549,25 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
           {connected ? 'LIVE' : 'RECONNECTING…'}
         </div>
       </div>
+      {/* Fullscreen button */}
+      <button
+        onClick={toggleFullscreen}
+        className="absolute z-[50] rounded cursor-pointer transition-opacity duration-300"
+        style={{
+          bottom: 28,
+          right: 8,
+          background: 'rgba(0,0,0,.45)',
+          border: '1px solid rgba(200,150,62,.2)',
+          color: 'rgba(200,150,62,.6)',
+          padding: '4px 8px',
+          fontSize: '.7rem',
+          fontFamily: 'Cinzel, serif',
+          opacity: showFsBtn ? 0.7 : 0.05,
+        }}
+        title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+      >
+        {isFullscreen ? '✕' : '⛶'}
+      </button>
     </div>
   );
 }

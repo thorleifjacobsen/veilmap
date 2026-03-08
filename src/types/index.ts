@@ -92,6 +92,7 @@ export type SSEEventType =
   | 'camera:move'
   | 'objects:update'
   | 'grid:update'
+  | 'display:shake'
   | 'ping';
 
 export interface SSEEvent {

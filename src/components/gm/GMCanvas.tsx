@@ -155,7 +155,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [measureInfo, setMeasureInfo] = useState<string | null>(null);
   const [blackoutActive, setBlackoutActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
-    open: false, x: 0, y: 0, mapX: 0, mapY: 0, box: null, token: null,
+    open: false, x: 0, y: 0, mapX: 0, mapY: 0, box: null, token: null, object: null,
   });
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -165,6 +165,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [drawGridMode, setDrawGridMode] = useState(false);
   const [canvasCursor, setCanvasCursor] = useState<string>('crosshair');
   const [htmlVpTransform, setHtmlVpTransform] = useState('translate(0px,0px) scale(1)');
+  const [focusMode, setFocusMode] = useState(false);
 
   // Mutable refs for interaction state
   const vpRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
@@ -348,6 +349,15 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     },
     [slug],
   );
+
+  const handleShake = useCallback(() => {
+    fetch(`/api/sessions/${slug}/fog`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shake: { intensity: 'medium' } }),
+    }).catch(() => {});
+    showNotif('⚡ Shake sent!');
+  }, [slug, showNotif]);
 
   // ── Draw pipeline ──
 
@@ -1254,13 +1264,48 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         e.preventDefault();
         undo();
       }
+      // Ctrl+D / Cmd+D — duplicate selected object
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        const selId = selectedObjectIdRef.current;
+        if (selId) {
+          const obj = objectsRef.current.find(o => o.id === selId);
+          if (obj) {
+            const gs = gridSizeRef.current;
+            const newId = uuidv4();
+            const dup: MapObject = { ...obj, id: newId, x: obj.x + gs, y: obj.y + gs, zIndex: objectsRef.current.length, name: obj.name + ' copy' };
+            const before = [...objectsRef.current];
+            const updated = [...objectsRef.current, dup];
+            const existingImg = objectImagesRef.current.get(obj.id);
+            if (existingImg) objectImagesRef.current.set(newId, existingImg);
+            objectsRef.current = updated;
+            setObjects(updated);
+            setSelectedObjectId(newId);
+            selectedObjectIdRef.current = newId;
+            drawMap();
+            drawTop();
+            // Inline broadcast + undo
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `duplicated ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+            showNotif(`Duplicated: ${obj.name}`);
+          }
+        }
+        return;
+      }
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       const keyMap: Record<string, ToolName> = {
         r: 'reveal', h: 'hide', v: 'gridReveal', b: 'box', s: 'select', p: 'ping', m: 'measure', c: 'camera',
       };
-      const brushKeys: Record<string, number> = { '1': 15, '2': 36, '3': 70, '4': 130 };
+      const brushKeys: Record<string, number> = {
+        '1': Math.round(1 * gridSizeRef.current / 2),
+        '2': Math.round(2 * gridSizeRef.current / 2),
+        '3': Math.round(4 * gridSizeRef.current / 2),
+        '4': Math.round(8 * gridSizeRef.current / 2),
+      };
       const k = e.key.toLowerCase();
-      if (k === 'g') {
+      if (k === 'f' && !e.ctrlKey && !e.metaKey) {
+        setFocusMode(v => !v);
+      } else if (k === 'g') {
         setShowGrid((v) => { showGridRef.current = !v; return !v; });
       } else if (k === 'x') {
         const next = !blackoutActiveRef.current;
@@ -1287,6 +1332,56 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         setContextMenu((prev) => ({ ...prev, open: false }));
         setBoxEditorOpen(false);
         setSettingsOpen(false);
+        setFocusMode(false);
+        // Deselect any selected object
+        if (selectedObjectIdRef.current) {
+          setSelectedObjectId(null);
+          selectedObjectIdRef.current = null;
+          drawTop();
+        }
+      }
+      // Delete / Backspace — delete selected object
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selId = selectedObjectIdRef.current;
+        if (selId) {
+          const obj = objectsRef.current.find(o => o.id === selId);
+          if (obj) {
+            if (obj.locked) {
+              if (!window.confirm(`"${obj.name}" is locked. Delete anyway?`)) return;
+            }
+            const before = [...objectsRef.current];
+            const updated = objectsRef.current.filter(o => o.id !== selId);
+            objectsRef.current = updated;
+            setObjects(updated);
+            setSelectedObjectId(null);
+            selectedObjectIdRef.current = null;
+            drawMap();
+            drawTop();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+            showNotif(`Deleted: ${obj.name}`);
+          }
+        }
+      }
+      // Arrow keys — nudge selected object
+      if (e.key.startsWith('Arrow') && selectedObjectIdRef.current) {
+        e.preventDefault();
+        const selId = selectedObjectIdRef.current;
+        const obj = objectsRef.current.find(o => o.id === selId);
+        if (obj && !obj.locked) {
+          const step = e.shiftKey ? gridSizeRef.current : 1;
+          let dx = 0, dy = 0;
+          if (e.key === 'ArrowLeft') dx = -step;
+          if (e.key === 'ArrowRight') dx = step;
+          if (e.key === 'ArrowUp') dy = -step;
+          if (e.key === 'ArrowDown') dy = step;
+          const updated = objectsRef.current.map(o => o.id === selId ? { ...o, x: o.x + dx, y: o.y + dy } : o);
+          objectsRef.current = updated;
+          setObjects(updated);
+          drawMap();
+          drawTop();
+          fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+        }
       }
       if (e.key === '+' || e.key === '=') {
         const wrap = wrapRef.current;
@@ -1319,7 +1414,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('keyup', onKeyUp);
     };
-  }, [undo, setTool, redrawAll, broadcastBlackout, prepMessage, showNotif, drawTop]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undo, setTool, redrawAll, broadcastBlackout, prepMessage, showNotif, drawTop, drawMap]);
 
   // ── Mouse handlers ──
 
@@ -1856,14 +1952,20 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         (b) => mp.x >= b.x && mp.x <= b.x + b.w && mp.y >= b.y && mp.y <= b.y + b.h,
       ) || null;
       const token = null;
+      // Check if right-clicking on a map object
+      const clickedObject = [...objectsRef.current].reverse().find((obj) => {
+        if (!obj.visible) return false;
+        return mp.x >= obj.x && mp.x <= obj.x + obj.w && mp.y >= obj.y && mp.y <= obj.y + obj.h;
+      }) || null;
       setContextMenu({
         open: true,
         x: e.clientX,
         y: e.clientY,
         mapX: mp.x,
         mapY: mp.y,
-        box,
+        box: clickedObject ? null : box,
         token,
+        object: clickedObject,
       });
     },
     [getCanvasPos],
@@ -1874,7 +1976,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const handleCtxAction = useCallback(
     (action: string) => {
       setContextMenu((prev) => ({ ...prev, open: false }));
-      const { mapX, mapY, box } = contextMenu;
+      const { mapX, mapY, box, object: ctxObj } = contextMenu;
       switch (action) {
         case 'reveal':
           pushUndo();
@@ -1910,9 +2012,128 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             pushUndoEntry({ type: 'box-delete', label: `room "${box.name}" deleted`, boxesBefore: beforeBoxes, boxesAfter: [...updated] });
           }
           break;
+        // Object context menu actions
+        case 'duplicateObject':
+          if (ctxObj) {
+            const gs = gridSizeRef.current;
+            const newId = uuidv4();
+            const dup: MapObject = { ...ctxObj, id: newId, x: ctxObj.x + gs, y: ctxObj.y + gs, zIndex: objectsRef.current.length, name: ctxObj.name + ' copy' };
+            const before = [...objectsRef.current];
+            const updated = [...objectsRef.current, dup];
+            const existingImg = objectImagesRef.current.get(ctxObj.id);
+            if (existingImg) objectImagesRef.current.set(newId, existingImg);
+            objectsRef.current = updated;
+            setObjects(updated);
+            setSelectedObjectId(newId);
+            selectedObjectIdRef.current = newId;
+            drawMap();
+            drawTop();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `duplicated ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+            showNotif(`Duplicated: ${ctxObj.name}`);
+          }
+          break;
+        case 'renameObject':
+          if (ctxObj) {
+            const newName = window.prompt('Rename object:', ctxObj.name);
+            if (newName && newName.trim()) {
+              const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, name: newName.trim() } : o);
+              objectsRef.current = updated;
+              setObjects(updated);
+              drawMap();
+              fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            }
+          }
+          break;
+        case 'bringToFront': {
+          if (ctxObj) {
+            const maxZ = Math.max(...objectsRef.current.map(o => o.zIndex));
+            const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, zIndex: maxZ + 1 } : o);
+            objectsRef.current = updated;
+            setObjects(updated);
+            drawMap();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+          }
+          break;
+        }
+        case 'sendToBack': {
+          if (ctxObj) {
+            const minZ = Math.min(...objectsRef.current.map(o => o.zIndex));
+            const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, zIndex: minZ - 1 } : o);
+            objectsRef.current = updated;
+            setObjects(updated);
+            drawMap();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+          }
+          break;
+        }
+        case 'moveObjectUp':
+        case 'moveObjectDown': {
+          if (ctxObj) {
+            const dir = action === 'moveObjectUp' ? 'up' : 'down';
+            const sorted = [...objectsRef.current].sort((a, b) => a.zIndex - b.zIndex);
+            const idx = sorted.findIndex(o => o.id === ctxObj.id);
+            if (idx >= 0) {
+              const swapIdx = dir === 'up' ? idx + 1 : idx - 1;
+              if (swapIdx >= 0 && swapIdx < sorted.length) {
+                const tmpZ = sorted[idx].zIndex;
+                sorted[idx] = { ...sorted[idx], zIndex: sorted[swapIdx].zIndex };
+                sorted[swapIdx] = { ...sorted[swapIdx], zIndex: tmpZ };
+                objectsRef.current = sorted;
+                setObjects([...sorted]);
+                drawMap();
+                fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: sorted }) }).catch(() => {});
+              }
+            }
+          }
+          break;
+        }
+        case 'toggleLock':
+          if (ctxObj) {
+            const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, locked: !ctxObj.locked } : o);
+            objectsRef.current = updated;
+            setObjects(updated);
+            drawMap();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+          }
+          break;
+        case 'toggleGmVisible':
+          if (ctxObj) {
+            const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, visible: !ctxObj.visible } : o);
+            objectsRef.current = updated;
+            setObjects(updated);
+            drawMap();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+          }
+          break;
+        case 'togglePlayerVisible':
+          if (ctxObj) {
+            const updated = objectsRef.current.map(o => o.id === ctxObj.id ? { ...o, playerVisible: !ctxObj.playerVisible } : o);
+            objectsRef.current = updated;
+            setObjects(updated);
+            drawMap();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+          }
+          break;
+        case 'deleteObject':
+          if (ctxObj) {
+            if (ctxObj.locked && !window.confirm(`"${ctxObj.name}" is locked. Delete anyway?`)) break;
+            const before = [...objectsRef.current];
+            const updated = objectsRef.current.filter(o => o.id !== ctxObj.id);
+            objectsRef.current = updated;
+            setObjects(updated);
+            setSelectedObjectId(null);
+            selectedObjectIdRef.current = null;
+            drawMap();
+            drawTop();
+            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `deleted ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+            showNotif(`Deleted: ${ctxObj.name}`);
+          }
+          break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, slug],
   );
 
   // ── Box editor callbacks ──
@@ -2266,26 +2487,34 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   }, []);
 
   return (
-    <div className="flex h-full flex-col select-none" style={{ background: '#07060c', fontFamily: "'Crimson Pro',Georgia,serif", color: '#d4c4a0' }} onContextMenu={handleGlobalContextMenu}>
+    <div className="flex h-full flex-col select-none" style={{ background: '#07060c', fontFamily: "'Crimson Pro',Georgia,serif", color: '#d4c4a0', height: '100dvh', overflow: 'hidden' }} onContextMenu={handleGlobalContextMenu}>
       {/* Header */}
       <header
-        className="z-50 flex flex-shrink-0 items-center justify-between px-3 py-[7px]"
-        style={{ background: '#100f18', borderBottom: '1px solid rgba(200,150,62,.2)' }}
+        className="z-50 flex flex-shrink-0 items-center justify-between px-3 transition-all duration-200"
+        style={{
+          background: '#100f18',
+          borderBottom: '1px solid rgba(200,150,62,.2)',
+          padding: focusMode ? '2px 8px' : '7px 12px',
+        }}
       >
-        <div
-          className="text-[1.15rem] font-black tracking-[.08em]"
-          style={{ fontFamily: "'Cinzel',serif", color: '#c8963e', textShadow: '0 0 16px rgba(200,150,62,.3)' }}
-        >
-          Veil<span style={{ color: '#e05c2a', fontStyle: 'normal' }}>Map</span>
-        </div>
-        <div className="flex items-center gap-[7px]">
-          <button
-            className="cursor-pointer rounded border px-2 py-0.5 text-[.68rem] font-medium tracking-[.05em] transition-all hover:border-[#c8963e] hover:text-[#c8963e]"
-            style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.5)', borderColor: 'rgba(200,150,62,.15)', background: 'transparent' }}
-            onClick={() => setZoomModalOpen(true)}
+        {!focusMode && (
+          <div
+            className="text-[1.15rem] font-black tracking-[.08em]"
+            style={{ fontFamily: "'Cinzel',serif", color: '#c8963e', textShadow: '0 0 16px rgba(200,150,62,.3)' }}
           >
-            {zoomPercent}%
-          </button>
+            Veil<span style={{ color: '#e05c2a', fontStyle: 'normal' }}>Map</span>
+          </div>
+        )}
+        <div className="flex items-center gap-[7px]" style={focusMode ? { marginLeft: 'auto' } : undefined}>
+          {!focusMode && (
+            <button
+              className="cursor-pointer rounded border px-2 py-0.5 text-[.68rem] font-medium tracking-[.05em] transition-all hover:border-[#c8963e] hover:text-[#c8963e]"
+              style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.5)', borderColor: 'rgba(200,150,62,.15)', background: 'transparent' }}
+              onClick={() => setZoomModalOpen(true)}
+            >
+              {zoomPercent}%
+            </button>
+          )}
           {blackoutActive && (
             <span
               className="px-1.5 py-0.5 text-[.62rem] tracking-[.06em] rounded"
@@ -2294,29 +2523,40 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
               ⬛ BLACKOUT
             </span>
           )}
-          <HeaderBtn onClick={handleResetView}>⌂ Fit</HeaderBtn>
-          <HeaderBtn onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/play/${slug}`).then(() => showNotif('Player URL copied!')).catch(() => showNotif('Copy failed — check clipboard permissions')); }}>📺 Player</HeaderBtn>
-          <HeaderBtn onClick={() => setSettingsOpen(true)}>⚙</HeaderBtn>
-          <HeaderBtn onClick={undo}>↩ Undo</HeaderBtn>
+          {!focusMode && (
+            <>
+              <HeaderBtn onClick={handleResetView}>⌂ Fit</HeaderBtn>
+              <HeaderBtn onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/play/${slug}`).then(() => showNotif('Player URL copied!')).catch(() => showNotif('Copy failed — check clipboard permissions')); }}>📺 Player</HeaderBtn>
+              <HeaderBtn onClick={() => setSettingsOpen(true)}>⚙</HeaderBtn>
+              <HeaderBtn onClick={undo}>↩ Undo</HeaderBtn>
+            </>
+          )}
+          <HeaderBtn onClick={() => setFocusMode(v => !v)} title="Focus Mode (F)">
+            {focusMode ? '⊞' : '⊟'}
+          </HeaderBtn>
         </div>
       </header>
 
       {/* Main layout */}
       <div className="flex flex-1 overflow-hidden">
-        <Toolbar
-          activeTool={tool}
-          onToolChange={setTool}
-          brushRadius={brushRadius}
-          onBrushChange={(r) => { setBrushRadius(r); brushRadiusRef.current = r; }}
-          showGrid={showGrid}
-          onToggleGrid={() => setShowGrid((v) => { showGridRef.current = !v; return !v; })}
-          onResetFog={handleResetFog}
-          onRevealAllFog={handleRevealAllFog}
-          onGridRightClick={handleGridRightClick}
-          onMeasureRightClick={handleMeasureRightClick}
-          snapToGrid={snapToGrid}
-          onSnapToGridToggle={() => { setSnapToGrid(v => { snapToGridRef.current = !v; return !v; }); }}
-        />
+        {!focusMode && (
+          <Toolbar
+            activeTool={tool}
+            onToolChange={setTool}
+            brushRadius={brushRadius}
+            onBrushChange={(r) => { setBrushRadius(r); brushRadiusRef.current = r; }}
+            gridSize={gridSize}
+            showGrid={showGrid}
+            onToggleGrid={() => setShowGrid((v) => { showGridRef.current = !v; return !v; })}
+            onResetFog={handleResetFog}
+            onRevealAllFog={handleRevealAllFog}
+            onGridRightClick={handleGridRightClick}
+            onMeasureRightClick={handleMeasureRightClick}
+            snapToGrid={snapToGrid}
+            onSnapToGridToggle={() => { setSnapToGrid(v => { snapToGridRef.current = !v; return !v; }); }}
+            onShake={handleShake}
+          />
+        )}
 
         {/* Canvas wrapper */}
         <div
@@ -2407,25 +2647,44 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           )}
         </div>
 
-        <RightPanel
-          boxes={boxes}
-          objects={objects}
-          selectedBoxId={selectedBoxId}
-          selectedObjectId={selectedObjectId}
-          onObjectSelect={(id) => { setSelectedObjectId(id); drawTop(); }}
-          onBoxClick={(b) => { setEditingBox(b); setBoxEditorOpen(true); setSelectedBoxId(b.id); }}
-          onRevealAll={handleRevealAll}
-          onClearBoxes={handleClearBoxes}
-          onMapUpload={handleMapUpload}
-          onExport={handleExport}
-          onImport={handleImport}
-          onObjectAdd={handleObjectAdd}
-          onObjectUpdate={handleObjectUpdate}
-          onObjectDelete={handleObjectDelete}
-          onObjectReorder={handleObjectReorder}
-          onLibraryOpen={openLibrary}
-        />
+        {!focusMode && (
+          <RightPanel
+            boxes={boxes}
+            objects={objects}
+            selectedBoxId={selectedBoxId}
+            selectedObjectId={selectedObjectId}
+            onObjectSelect={(id) => { setSelectedObjectId(id); drawTop(); }}
+            onBoxClick={(b) => { setEditingBox(b); setBoxEditorOpen(true); setSelectedBoxId(b.id); }}
+            onRevealAll={handleRevealAll}
+            onClearBoxes={handleClearBoxes}
+            onMapUpload={handleMapUpload}
+            onExport={handleExport}
+            onImport={handleImport}
+            onObjectAdd={handleObjectAdd}
+            onObjectUpdate={handleObjectUpdate}
+            onObjectDelete={handleObjectDelete}
+            onObjectReorder={handleObjectReorder}
+            onLibraryOpen={openLibrary}
+          />
+        )}
       </div>
+
+      {/* Focus mode info pill */}
+      {focusMode && (
+        <div
+          className="pointer-events-none fixed bottom-[42px] left-3 z-[500] rounded-full px-3 py-1"
+          style={{
+            background: 'rgba(7,6,12,.75)',
+            border: '1px solid rgba(200,150,62,.2)',
+            fontFamily: "'Cinzel',serif",
+            fontSize: '.6rem',
+            color: 'rgba(200,150,62,.5)',
+            letterSpacing: '.06em',
+          }}
+        >
+          {tool.toUpperCase()} {['reveal', 'hide', 'gridReveal'].includes(tool) ? `· ${brushRadius}px` : ''}
+        </div>
+      )}
 
       {/* Notification toast */}
       <div
@@ -2758,7 +3017,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   );
 }
 
-function HeaderBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+function HeaderBtn({ children, onClick, title }: { children: React.ReactNode; onClick: () => void; title?: string }) {
   return (
     <button
       className="rounded border px-2.5 py-1 text-[.68rem] font-medium tracking-[.05em] transition-all hover:border-[#c8963e] hover:text-[#c8963e]"
@@ -2770,6 +3029,7 @@ function HeaderBtn({ children, onClick }: { children: React.ReactNode; onClick: 
         cursor: 'pointer',
       }}
       onClick={onClick}
+      title={title}
     >
       {children}
     </button>
