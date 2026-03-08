@@ -31,12 +31,11 @@ import {
   hexToRgba,
   type Viewport,
 } from '@/lib/viewport';
-import Toolbar from './Toolbar';
+import Toolbar, { type FogSubTool } from './Toolbar';
 import RightPanel from './RightPanel';
 import BoxEditor from './BoxEditor';
 import SettingsModal from './SettingsModal';
 import ContextMenu, { type ContextMenuState } from './ContextMenu';
-import { renderAnimatedFogGM } from '@/lib/animated-fog';
 import { useSessionWS } from '@/hooks/useSessionWS';
 import { dialogConfirm, dialogPrompt } from '@/components/DialogModal';
 
@@ -139,6 +138,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   // State
   const [tool, setToolState] = useState<ToolName>('reveal');
+  const [revealSubTool, setRevealSubTool] = useState<FogSubTool>('brush');
+  const [hideSubTool, setHideSubTool] = useState<FogSubTool>('brush');
   const [brushRadius, setBrushRadius] = useState(36);
   const [showGrid, setShowGrid] = useState(session.show_grid ?? false);
   const [gmFogOpacity, setGmFogOpacity] = useState(session.gm_fog_opacity);
@@ -147,7 +148,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const [gridOpacity, setGridOpacity] = useState(session.grid_opacity ?? 0.25);
   const [measurementUnit, setMeasurementUnit] = useState<'feet' | 'meters'>((session.measurement_unit as 'feet' | 'meters') || 'feet');
   const [measureMenuOpen, setMeasureMenuOpen] = useState<{ x: number; y: number } | null>(null);
-  const [fogStyle, setFogStyle] = useState<'solid' | 'animated'>((session.fog_style as 'solid' | 'animated') || 'solid');
+  const [fogStyle, setFogStyle] = useState<'solid' | 'animated'>('solid');
   const [prepMessage, setPrepMessage] = useState(session.prep_message || 'Preparing next scene…');
   const [sessionName, setSessionName] = useState(session.name);
   const [boxes, setBoxes] = useState<Box[]>(session.boxes || []);
@@ -210,8 +211,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   const brushRadiusRef = useRef(36);
   const showGridRef = useRef(session.show_grid ?? false);
   const measurementUnitRef = useRef<'feet' | 'meters'>((session.measurement_unit as 'feet' | 'meters') || 'feet');
-  const fogStyleRef = useRef<'solid' | 'animated'>((session.fog_style as 'solid' | 'animated') || 'solid');
-  const fogAnimRafRef = useRef<number>(0);
+  const fogStyleRef = useRef<'solid' | 'animated'>('solid');
+  const revealSubToolRef = useRef<FogSubTool>('brush');
+  const hideSubToolRef = useRef<FogSubTool>('brush');
+  const rectDrawStartRef = useRef<{ x: number; y: number } | null>(null);
   const lastPaintPosRef = useRef<{ x: number; y: number } | null>(null);
   const cameraRef = useRef<CameraViewport>(
     session.camera_x != null && session.camera_y != null && session.camera_w != null && session.camera_h != null
@@ -234,6 +237,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   // Keep refs in sync
   useEffect(() => { toolRef.current = tool; }, [tool]);
+  useEffect(() => { revealSubToolRef.current = revealSubTool; }, [revealSubTool]);
+  useEffect(() => { hideSubToolRef.current = hideSubTool; }, [hideSubTool]);
   useEffect(() => { boxesRef.current = boxes; }, [boxes]);
   useEffect(() => { objectsRef.current = objects; }, [objects]);
   useEffect(() => { gridSizeRef.current = gridSize; }, [gridSize]);
@@ -241,7 +246,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { brushRadiusRef.current = brushRadius; }, [brushRadius]);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
   useEffect(() => { measurementUnitRef.current = measurementUnit; }, [measurementUnit]);
-  useEffect(() => { fogStyleRef.current = fogStyle; }, [fogStyle]);
   useEffect(() => { blackoutActiveRef.current = blackoutActive; }, [blackoutActive]);
   useEffect(() => { selectedObjectIdRef.current = selectedObjectId; }, [selectedObjectId]);
   useEffect(() => { snapToGridRef.current = snapToGrid; }, [snapToGrid]);
@@ -407,10 +411,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     applyViewport(ctx, vpRef.current);
     ctx.globalAlpha = gmFogOpacityRef.current;
     ctx.drawImage(fogCanvas, 0, 0);
-    // Animated fog overlay
-    if (fogStyleRef.current === 'animated') {
-      renderAnimatedFogGM(ctx, fogCanvas, Date.now() / 1000, MAP_W, MAP_H);
-    }
     ctx.globalAlpha = 1;
     ctx.restore();
   }, []);
@@ -459,8 +459,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.stroke();
     });
 
-    // Brush cursor (reveal/hide tool — show radius circle)
-    if (toolRef.current === 'reveal' || toolRef.current === 'hide') {
+    // Brush cursor (reveal/hide tool brush sub-tool — show radius circle)
+    const activeFogSubTool = toolRef.current === 'reveal' ? revealSubToolRef.current : toolRef.current === 'hide' ? hideSubToolRef.current : null;
+    if ((toolRef.current === 'reveal' || toolRef.current === 'hide') && activeFogSubTool === 'brush') {
       const mp = mousePosRef.current;
       const r = brushRadiusRef.current;
       ctx.strokeStyle = 'rgba(200,150,62,.5)';
@@ -472,8 +473,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       ctx.setLineDash([]);
     }
 
-    // Grid reveal cursor (highlight hovered grid cell)
-    if (toolRef.current === 'gridReveal') {
+    // Grid cursor (for reveal/hide grid sub-tool and gridReveal tool)
+    if ((toolRef.current === 'gridReveal') ||
+        ((toolRef.current === 'reveal' || toolRef.current === 'hide') && activeFogSubTool === 'grid')) {
       const mp = mousePosRef.current;
       const gs = gridSizeRef.current;
       const cellX = Math.floor(mp.mx / gs) * gs;
@@ -606,6 +608,28 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         }
       }
 
+      ctx.restore();
+    }
+
+    // Rectangle fog tool preview (reveal/hide rectangle sub-tool)
+    const rectStart = rectDrawStartRef.current;
+    const activeSub = toolRef.current === 'reveal' ? revealSubToolRef.current : toolRef.current === 'hide' ? hideSubToolRef.current : null;
+    if (rectStart && (toolRef.current === 'reveal' || toolRef.current === 'hide') && activeSub === 'rectangle') {
+      const mp = mousePosRef.current;
+      ctx.save();
+      applyViewport(ctx, vp);
+      const rx = Math.min(rectStart.x, mp.mx);
+      const ry = Math.min(rectStart.y, mp.my);
+      const rw = Math.abs(mp.mx - rectStart.x);
+      const rh = Math.abs(mp.my - rectStart.y);
+      const isReveal = toolRef.current === 'reveal';
+      ctx.strokeStyle = isReveal ? 'rgba(100,220,100,.75)' : 'rgba(200,150,62,.75)';
+      ctx.lineWidth = 2 / vp.scale;
+      ctx.setLineDash([6 / vp.scale, 3 / vp.scale]);
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.setLineDash([]);
+      ctx.fillStyle = isReveal ? 'rgba(100,220,100,.07)' : 'rgba(200,150,62,.07)';
+      ctx.fillRect(rx, ry, rw, rh);
       ctx.restore();
     }
 
@@ -992,6 +1016,24 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     [composeFogGM, sendFogPaint],
   );
 
+  const paintGridHideCell = useCallback(
+    (mx: number, my: number) => {
+      const fogCanvas = fogCanvasRef.current;
+      if (!fogCanvas) return;
+      const gs = gridSizeRef.current;
+      const cellX = Math.floor(mx / gs) * gs;
+      const cellY = Math.floor(my / gs) * gs;
+      const cellKey = `${cellX},${cellY}`;
+      if (gridRevealCellsRef.current.has(cellKey)) return;
+      gridRevealCellsRef.current.add(cellKey);
+      const ctx = fogCanvas.getContext('2d')!;
+      paintHide(ctx, cellX + gs / 2, cellY + gs / 2, gs / 2);
+      composeFogGM();
+      sendFogPaint(cellX + gs / 2, cellY + gs / 2, gs / 2, 'hide');
+    },
+    [composeFogGM, sendFogPaint],
+  );
+
   const resetFog = useCallback(() => {
     pushUndo();
     fogDirtyRef.current = true;
@@ -1031,8 +1073,29 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   // ── Tool switching ──
 
+  const FOG_SUB_TOOLS: FogSubTool[] = ['brush', 'grid', 'rectangle'];
+
   const setTool = useCallback(
     (t: ToolName) => {
+      // If already on reveal/hide, cycle sub-tools
+      if (t === 'reveal' && toolRef.current === 'reveal') {
+        const idx = FOG_SUB_TOOLS.indexOf(revealSubToolRef.current);
+        const next = FOG_SUB_TOOLS[(idx + 1) % FOG_SUB_TOOLS.length];
+        setRevealSubTool(next);
+        revealSubToolRef.current = next;
+        showHint(`Reveal: ${next}`);
+        drawTop();
+        return;
+      }
+      if (t === 'hide' && toolRef.current === 'hide') {
+        const idx = FOG_SUB_TOOLS.indexOf(hideSubToolRef.current);
+        const next = FOG_SUB_TOOLS[(idx + 1) % FOG_SUB_TOOLS.length];
+        setHideSubTool(next);
+        hideSubToolRef.current = next;
+        showHint(`Hide: ${next}`);
+        drawTop();
+        return;
+      }
       setToolState(t);
       toolRef.current = t;
       showHint(TOOL_HINTS[t] || '');
@@ -1266,37 +1329,6 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { composeFogGM(); }, [gmFogOpacity, composeFogGM]);
   // Redraw map when grid toggles or gridSize/color/opacity changes
   useEffect(() => { drawMap(); }, [showGrid, gridSize, gridColor, gridOpacity, drawMap]);
-
-  // Animated fog animation loop
-  useEffect(() => {
-    if (fogStyle !== 'animated') {
-      if (fogAnimRafRef.current) cancelAnimationFrame(fogAnimRafRef.current);
-      fogAnimRafRef.current = 0;
-      composeFogGM(); // Redraw once to clear animation artifacts
-      return;
-    }
-    let droppedFrames = 0;
-    let lastFrameTime = performance.now();
-    const animate = () => {
-      const now = performance.now();
-      const dt = now - lastFrameTime;
-      lastFrameTime = now;
-      // Auto-disable if sustained poor performance (>66ms = <15fps for 60+ frames)
-      if (dt > 66) droppedFrames++;
-      else droppedFrames = Math.max(0, droppedFrames - 2);
-      if (droppedFrames > 60) {
-        setFogStyle('solid');
-        fogStyleRef.current = 'solid';
-        return;
-      }
-      composeFogGM();
-      fogAnimRafRef.current = requestAnimationFrame(animate);
-    };
-    fogAnimRafRef.current = requestAnimationFrame(animate);
-    return () => {
-      if (fogAnimRafRef.current) cancelAnimationFrame(fogAnimRafRef.current);
-    };
-  }, [fogStyle, composeFogGM]);
 
   // Persist showGrid/gridSize/gridColor/gridOpacity and broadcast to player when they change
   useEffect(() => {
@@ -1647,14 +1679,38 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         return;
       }
       if (toolRef.current === 'reveal' || toolRef.current === 'hide') {
-        if (!paintUndoPushedRef.current) {
-          pushUndo();
-          paintUndoPushedRef.current = true;
+        const subTool = toolRef.current === 'reveal' ? revealSubToolRef.current : hideSubToolRef.current;
+        if (subTool === 'brush') {
+          if (!paintUndoPushedRef.current) {
+            pushUndo();
+            paintUndoPushedRef.current = true;
+          }
+          paintingRef.current = true;
+          fogDirtyRef.current = true;
+          lastPaintPosRef.current = { x: mp.x, y: mp.y };
+          paintFog(mp.x, mp.y, toolRef.current);
+        } else if (subTool === 'grid') {
+          if (!paintUndoPushedRef.current) {
+            pushUndo();
+            paintUndoPushedRef.current = true;
+          }
+          paintingRef.current = true;
+          fogDirtyRef.current = true;
+          gridRevealCellsRef.current.clear();
+          if (toolRef.current === 'reveal') {
+            paintGridRevealCell(mp.x, mp.y);
+          } else {
+            paintGridHideCell(mp.x, mp.y);
+          }
+        } else if (subTool === 'rectangle') {
+          rectDrawStartRef.current = { x: mp.x, y: mp.y };
+          paintingRef.current = true;
+          fogDirtyRef.current = true;
+          if (!paintUndoPushedRef.current) {
+            pushUndo();
+            paintUndoPushedRef.current = true;
+          }
         }
-        paintingRef.current = true;
-        fogDirtyRef.current = true;
-        lastPaintPosRef.current = { x: mp.x, y: mp.y };
-        paintFog(mp.x, mp.y, toolRef.current);
       }
       if (toolRef.current === 'gridReveal') {
         if (!paintUndoPushedRef.current) {
@@ -1667,7 +1723,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         paintGridRevealCell(mp.x, mp.y);
       }
     },
-    [getCanvasPos, addPing, setTool, clickSelect, pushUndo, paintFog, paintGridRevealCell, drawTop, drawGridMode, finalizePolygon],
+    [getCanvasPos, addPing, setTool, clickSelect, pushUndo, paintFog, paintGridRevealCell, paintGridHideCell, drawTop, drawGridMode, finalizePolygon],
   );
 
   const handleMouseMove = useCallback(
@@ -1806,31 +1862,43 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       }
 
       if (paintingRef.current && (toolRef.current === 'reveal' || toolRef.current === 'hide')) {
-        // Interpolate between last position and current position
-        const lastPos = lastPaintPosRef.current;
-        if (lastPos) {
-          const dx = mp.x - lastPos.x;
-          const dy = mp.y - lastPos.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const INTERPOLATION_STEP_FACTOR = 0.3; // fraction of brush radius used as step distance
-          const step = brushRadiusRef.current * INTERPOLATION_STEP_FACTOR;
-          if (dist > step) {
-            const steps = Math.ceil(dist / step);
-            for (let i = 1; i <= steps; i++) {
-              const t = i / steps;
-              const ix = lastPos.x + dx * t;
-              const iy = lastPos.y + dy * t;
-              paintFog(ix, iy, toolRef.current);
+        const subTool = toolRef.current === 'reveal' ? revealSubToolRef.current : hideSubToolRef.current;
+        if (subTool === 'brush') {
+          // Interpolate between last position and current position
+          const lastPos = lastPaintPosRef.current;
+          if (lastPos) {
+            const dx = mp.x - lastPos.x;
+            const dy = mp.y - lastPos.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const INTERPOLATION_STEP_FACTOR = 0.3;
+            const step = brushRadiusRef.current * INTERPOLATION_STEP_FACTOR;
+            if (dist > step) {
+              const steps = Math.ceil(dist / step);
+              for (let i = 1; i <= steps; i++) {
+                const t = i / steps;
+                const ix = lastPos.x + dx * t;
+                const iy = lastPos.y + dy * t;
+                paintFog(ix, iy, toolRef.current);
+              }
+            } else {
+              paintFog(mp.x, mp.y, toolRef.current);
             }
           } else {
             paintFog(mp.x, mp.y, toolRef.current);
           }
-        } else {
-          paintFog(mp.x, mp.y, toolRef.current);
+          lastPaintPosRef.current = { x: mp.x, y: mp.y };
+          drawTop();
+          return;
+        } else if (subTool === 'grid') {
+          if (toolRef.current === 'reveal') paintGridRevealCell(mp.x, mp.y);
+          else paintGridHideCell(mp.x, mp.y);
+          drawTop();
+          return;
+        } else if (subTool === 'rectangle') {
+          // Just redraw to update preview
+          drawTop();
+          return;
         }
-        lastPaintPosRef.current = { x: mp.x, y: mp.y };
-        drawTop();
-        return;
       }
 
       if (paintingRef.current && toolRef.current === 'gridReveal') {
@@ -1887,7 +1955,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         drawTop();
       }
     },
-    [getCanvasPos, redrawAll, drawTop, drawMap, paintFog],
+    [getCanvasPos, redrawAll, drawTop, drawMap, paintFog, paintGridRevealCell, paintGridHideCell],
   );
 
   const handleMouseUp = useCallback(
@@ -2023,13 +2091,39 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         drawTop();
       }
       if (paintingRef.current) {
+        // Apply rectangle fog on mouseUp
+        const rectStart = rectDrawStartRef.current;
+        const subTool = toolRef.current === 'reveal' ? revealSubToolRef.current : toolRef.current === 'hide' ? hideSubToolRef.current : null;
+        if (rectStart && subTool === 'rectangle' && (toolRef.current === 'reveal' || toolRef.current === 'hide')) {
+          const { sx: sx2, sy: sy2 } = getCanvasPos(e);
+          const mp2 = screenToMap(sx2, sy2, vpRef.current);
+          const fogCanvas = fogCanvasRef.current;
+          if (fogCanvas) {
+            const ctx = fogCanvas.getContext('2d')!;
+            const rx = Math.min(rectStart.x, mp2.x);
+            const ry = Math.min(rectStart.y, mp2.y);
+            const rw = Math.abs(mp2.x - rectStart.x);
+            const rh = Math.abs(mp2.y - rectStart.y);
+            if (rw > 2 && rh > 2) {
+              if (toolRef.current === 'reveal') {
+                ctx.clearRect(rx, ry, rw, rh);
+              } else {
+                ctx.fillStyle = '#1a1a2e';
+                ctx.fillRect(rx, ry, rw, rh);
+              }
+              composeFogGM();
+              fogDirtyRef.current = true;
+            }
+          }
+          rectDrawStartRef.current = null;
+        }
         paintingRef.current = false;
         paintUndoPushedRef.current = false;
         lastPaintPosRef.current = null;
         sendFogSnapshot();
       }
     },
-    [getCanvasPos, drawTop, drawGridMode, sendFogSnapshot, broadcastCamera, showNotif, slug],
+    [getCanvasPos, drawTop, drawGridMode, sendFogSnapshot, broadcastCamera, showNotif, slug, composeFogGM],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -2040,6 +2134,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     objectDragRef.current = null;
     objectResizeRef.current = null;
     objectRotateRef.current = null;
+    rectDrawStartRef.current = null;
     if (paintingRef.current) {
       paintingRef.current = false;
       paintUndoPushedRef.current = false;
@@ -2623,11 +2718,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         }}
       >
         {!focusMode && (
-          <div
-            className="text-[1.15rem] font-black tracking-[.08em]"
-            style={{ fontFamily: "'Cinzel',serif", color: '#c8963e', textShadow: '0 0 16px rgba(200,150,62,.3)' }}
-          >
-            Veil<span style={{ color: '#e05c2a', fontStyle: 'normal' }}>Map</span>
+          <div className="flex items-center gap-3">
+            <a
+              href="/dashboard"
+              className="text-[.62rem] tracking-[.06em] transition-colors hover:text-[#c8963e]"
+              style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)', textDecoration: 'none' }}
+              title="Back to Dashboard"
+            >
+              ← Dashboard
+            </a>
+            <div
+              className="text-[1.15rem] font-black tracking-[.08em]"
+              style={{ fontFamily: "'Cinzel',serif", color: '#c8963e', textShadow: '0 0 16px rgba(200,150,62,.3)' }}
+            >
+              Veil<span style={{ color: '#e05c2a', fontStyle: 'normal' }}>Map</span>
+            </div>
           </div>
         )}
         <div className="flex items-center gap-[7px]" style={focusMode ? { marginLeft: 'auto' } : undefined}>
@@ -2680,6 +2785,10 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             snapToGrid={snapToGrid}
             onSnapToGridToggle={() => { setSnapToGrid(v => { snapToGridRef.current = !v; return !v; }); }}
             onShake={handleShake}
+            revealSubTool={revealSubTool}
+            onRevealSubToolChange={(st) => { setRevealSubTool(st); revealSubToolRef.current = st; setToolState('reveal'); toolRef.current = 'reveal'; }}
+            hideSubTool={hideSubTool}
+            onHideSubToolChange={(st) => { setHideSubTool(st); hideSubToolRef.current = st; setToolState('hide'); toolRef.current = 'hide'; }}
           />
         )}
 
@@ -2783,13 +2892,13 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             onRevealAll={handleRevealAll}
             onClearBoxes={handleClearBoxes}
             onMapUpload={handleMapUpload}
-            onExport={handleExport}
-            onImport={handleImport}
             onObjectAdd={handleObjectAdd}
             onObjectUpdate={handleObjectUpdate}
             onObjectDelete={handleObjectDelete}
             onObjectReorder={handleObjectReorder}
             onLibraryOpen={openLibrary}
+            slug={slug}
+            onWsSend={wsSendRef.current}
           />
         )}
       </div>
@@ -2926,18 +3035,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         onPrepMessageChange={setPrepMessage}
         sessionName={sessionName}
         onSessionNameChange={setSessionName}
-        fogStyle={fogStyle}
-        onFogStyleChange={(v) => {
-          setFogStyle(v);
-          fogStyleRef.current = v;
-          fetch(`/api/sessions/${slug}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fog_style: v }),
-          }).catch(() => {});
-          // Broadcast fog_style change to player displays via WS
-          wsSendRef.current('fog:style', { style: v });
-        }}
+        onExport={handleExport}
+        onImport={handleImport}
       />
       <ContextMenu
         state={contextMenu}
