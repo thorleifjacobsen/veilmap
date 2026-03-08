@@ -156,8 +156,9 @@ export function renderAnimatedFog(
       const r = Math.round(40 + mistBright * 60);  // 10-70
       const g = Math.round(40 + mistBright * 60);  // 10-70
       const b = Math.round(65 + mistBright * 80);  // 25-105
+      const a = Math.min(0.6, Math.max(0.03, alpha));
 
-      mCtx.fillStyle = `rgba(${r},${g},${b},${Math.min(0.6, Math.max(0.03, alpha)).toFixed(2)})`;
+      mCtx.fillStyle = `rgba(${r},${g},${b},${(a * 100 | 0) / 100})`;
       mCtx.fillRect(px, py, CELL, CELL);
     }
   }
