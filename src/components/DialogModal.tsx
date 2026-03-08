@@ -67,14 +67,11 @@ export default function DialogModal() {
     return () => { globalShow = null; };
   }, []);
 
-  // Focus input or confirm button when opened
-  useEffect(() => {
-    if (state.open) {
-      if (state.defaultValue !== undefined) {
-        setTimeout(() => inputRef.current?.select(), 0);
-      } else {
-        setTimeout(() => confirmRef.current?.focus(), 0);
-      }
+  // Focus confirm button when opened (for confirm-only dialogs; prompt dialogs use autoFocus on input)
+  const confirmCallbackRef = useCallback((node: HTMLButtonElement | null) => {
+    confirmRef.current = node;
+    if (node && state.open && state.defaultValue === undefined) {
+      node.focus();
     }
   }, [state.open, state.defaultValue]);
 
@@ -129,6 +126,7 @@ export default function DialogModal() {
         {isPrompt && (
           <input
             ref={inputRef}
+            autoFocus
             defaultValue={state.defaultValue}
             className="mb-4 w-full rounded border px-3 py-2 text-[.85rem] outline-none"
             style={{
@@ -155,7 +153,7 @@ export default function DialogModal() {
             {state.cancelLabel || 'Cancel'}
           </button>
           <button
-            ref={confirmRef}
+            ref={confirmCallbackRef}
             className="cursor-pointer rounded px-4 py-1.5 text-[.78rem] transition-colors"
             style={{
               background: state.destructive ? 'rgba(224,92,42,.2)' : 'rgba(200,150,62,.2)',

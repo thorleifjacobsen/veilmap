@@ -88,6 +88,10 @@ const TYPE_COLORS: Record<string, string> = {
 const MAX_UNDO = 50;
 const POLYGON_SNAP_DISTANCE = 8; // px — how close to first vertex to close a polygon
 const MIN_OBJECT_SIZE = 4; // px — minimum object width/height when resizing
+const ROTATION_HANDLE_OFFSET = 30; // px — distance from object top to rotation handle
+const ROTATION_HANDLE_RADIUS = 6; // px — visual radius of the rotation handle circle
+const ROTATION_HANDLE_HIT_RADIUS = 10; // px — hit area radius for rotation handle
+const ROTATION_SNAP_DEGREES = 15; // degrees — snap increment when Shift is held during rotation
 const TOOL_HINTS: Partial<Record<ToolName, string>> = {
   box: 'Click to place polygon vertices (Shift=snap), click near first to close',
   select: 'Click to select · Drag to resize · Hold Shift for free scale',
@@ -663,7 +667,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             ctx.fillRect(cx - ms / 2, cy - ms / 2, ms, ms);
           });
           // Rotation handle — circle above top center
-          const rotHandleY = obj.y - 30 / vp.scale;
+          const rotHandleY = obj.y - ROTATION_HANDLE_OFFSET / vp.scale;
           const rotHandleCx = obj.x + obj.w / 2;
           // Stem line
           ctx.strokeStyle = 'rgba(0,180,255,.5)';
@@ -673,7 +677,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           ctx.lineTo(rotHandleCx, rotHandleY);
           ctx.stroke();
           // Circle
-          const rr = 6 / vp.scale;
+          const rr = ROTATION_HANDLE_RADIUS / vp.scale;
           ctx.fillStyle = 'rgba(0,180,255,.9)';
           ctx.beginPath();
           ctx.arc(rotHandleCx, rotHandleY, rr, 0, Math.PI * 2);
@@ -691,7 +695,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           ctx.fillStyle = '#fff';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'bottom';
-          ctx.fillText(`${deg}°`, obj.x + obj.w / 2, obj.y - 36 / vp.scale);
+          ctx.fillText(`${deg}°`, obj.x + obj.w / 2, obj.y - (ROTATION_HANDLE_OFFSET + ROTATION_HANDLE_RADIUS) / vp.scale);
         }
         ctx.restore();
       }
@@ -1505,8 +1509,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         if (selObj && !selObj.locked) {
           // Check rotation handle first (circle above top center)
           const rotHandleX = selObj.x + selObj.w / 2;
-          const rotHandleY = selObj.y - 30 / vpRef.current.scale;
-          const rotHitR = 10 / vpRef.current.scale;
+          const rotHandleY = selObj.y - ROTATION_HANDLE_OFFSET / vpRef.current.scale;
+          const rotHitR = ROTATION_HANDLE_HIT_RADIUS / vpRef.current.scale;
           if (Math.hypot(mp.x - rotHandleX, mp.y - rotHandleY) < rotHitR) {
             const centerX = selObj.x + selObj.w / 2;
             const centerY = selObj.y + selObj.h / 2;
@@ -1717,7 +1721,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           let newRotation = rot.origRotation + (currentAngle - rot.startAngle);
           // Shift held: snap to 15° increments
           if (shiftHeldRef.current) {
-            newRotation = Math.round(newRotation / 15) * 15;
+            newRotation = Math.round(newRotation / ROTATION_SNAP_DEGREES) * ROTATION_SNAP_DEGREES;
           }
           // Normalize to 0-360
           newRotation = ((newRotation % 360) + 360) % 360;
@@ -1972,6 +1976,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     cameraDragRef.current = null;
     objectDragRef.current = null;
     objectResizeRef.current = null;
+    objectRotateRef.current = null;
     if (paintingRef.current) {
       paintingRef.current = false;
       paintUndoPushedRef.current = false;
