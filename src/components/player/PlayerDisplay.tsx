@@ -7,6 +7,8 @@ import { applyViewport, hexToRgba, type Viewport } from '@/lib/viewport';
 import { renderAnimatedFog } from '@/lib/animated-fog';
 import PrepScreen from './PrepScreen';
 
+const FS_BTN_HIDE_DELAY = 3000; // ms — auto-hide fullscreen button after inactivity
+
 export default function PlayerDisplay({ slug }: { slug: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasBgRef = useRef<HTMLCanvasElement>(null);
@@ -439,16 +441,15 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  // Auto-hide fullscreen button after 3s of no mouse movement
+  // Auto-hide fullscreen button after inactivity
   useEffect(() => {
     const onMouseMove = () => {
       setShowFsBtn(true);
       if (fsTimerRef.current) clearTimeout(fsTimerRef.current);
-      fsTimerRef.current = setTimeout(() => setShowFsBtn(false), 3000);
+      fsTimerRef.current = setTimeout(() => setShowFsBtn(false), FS_BTN_HIDE_DELAY);
     };
     window.addEventListener('mousemove', onMouseMove);
-    // Start the timer
-    fsTimerRef.current = setTimeout(() => setShowFsBtn(false), 3000);
+    fsTimerRef.current = setTimeout(() => setShowFsBtn(false), FS_BTN_HIDE_DELAY);
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       if (fsTimerRef.current) clearTimeout(fsTimerRef.current);

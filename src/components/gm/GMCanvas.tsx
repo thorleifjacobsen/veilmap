@@ -42,6 +42,8 @@ import { renderAnimatedFogGM } from '@/lib/animated-fog';
 
 type ToolName = 'reveal' | 'hide' | 'gridReveal' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
 
+const FOG_TOOLS: ToolName[] = ['reveal', 'hide', 'gridReveal'];
+
 interface Ping { x: number; y: number; born: number }
 interface MeasureState { sx: number; sy: number; mx: number; my: number }
 
@@ -1250,6 +1252,27 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
   // ── Keyboard ──
 
+  // Helper: duplicate an object and broadcast
+  const duplicateObject = useCallback((obj: MapObject) => {
+    const gs = gridSizeRef.current;
+    const newId = uuidv4();
+    const maxZ = objectsRef.current.length > 0 ? Math.max(...objectsRef.current.map(o => o.zIndex)) + 1 : 0;
+    const dup: MapObject = { ...obj, id: newId, x: obj.x + gs, y: obj.y + gs, zIndex: maxZ, name: obj.name + ' copy' };
+    const before = [...objectsRef.current];
+    const updated = [...objectsRef.current, dup];
+    const existingImg = objectImagesRef.current.get(obj.id);
+    if (existingImg) objectImagesRef.current.set(newId, existingImg);
+    objectsRef.current = updated;
+    setObjects(updated);
+    setSelectedObjectId(newId);
+    selectedObjectIdRef.current = newId;
+    drawMap();
+    drawTop();
+    fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
+    undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `duplicated ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
+    showNotif(`Duplicated: ${obj.name}`);
+  }, [drawMap, drawTop, showNotif, slug]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (document.activeElement as HTMLElement)?.tagName;
@@ -1270,25 +1293,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         const selId = selectedObjectIdRef.current;
         if (selId) {
           const obj = objectsRef.current.find(o => o.id === selId);
-          if (obj) {
-            const gs = gridSizeRef.current;
-            const newId = uuidv4();
-            const dup: MapObject = { ...obj, id: newId, x: obj.x + gs, y: obj.y + gs, zIndex: objectsRef.current.length, name: obj.name + ' copy' };
-            const before = [...objectsRef.current];
-            const updated = [...objectsRef.current, dup];
-            const existingImg = objectImagesRef.current.get(obj.id);
-            if (existingImg) objectImagesRef.current.set(newId, existingImg);
-            objectsRef.current = updated;
-            setObjects(updated);
-            setSelectedObjectId(newId);
-            selectedObjectIdRef.current = newId;
-            drawMap();
-            drawTop();
-            // Inline broadcast + undo
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
-            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `duplicated ${obj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
-            showNotif(`Duplicated: ${obj.name}`);
-          }
+          if (obj) duplicateObject(obj);
         }
         return;
       }
@@ -2014,24 +2019,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
         // Object context menu actions
         case 'duplicateObject':
-          if (ctxObj) {
-            const gs = gridSizeRef.current;
-            const newId = uuidv4();
-            const dup: MapObject = { ...ctxObj, id: newId, x: ctxObj.x + gs, y: ctxObj.y + gs, zIndex: objectsRef.current.length, name: ctxObj.name + ' copy' };
-            const before = [...objectsRef.current];
-            const updated = [...objectsRef.current, dup];
-            const existingImg = objectImagesRef.current.get(ctxObj.id);
-            if (existingImg) objectImagesRef.current.set(newId, existingImg);
-            objectsRef.current = updated;
-            setObjects(updated);
-            setSelectedObjectId(newId);
-            selectedObjectIdRef.current = newId;
-            drawMap();
-            drawTop();
-            fetch(`/api/sessions/${slug}/fog`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objects: updated }) }).catch(() => {});
-            undoStackRef.current = [...undoStackRef.current.slice(-MAX_UNDO + 1), { type: 'object-add' as UndoType, label: `duplicated ${ctxObj.name}`, objectsBefore: before, objectsAfter: [...updated] }];
-            showNotif(`Duplicated: ${ctxObj.name}`);
-          }
+          if (ctxObj) duplicateObject(ctxObj);
           break;
         case 'renameObject':
           if (ctxObj) {
@@ -2133,7 +2121,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           break;
       }
     },
-    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, slug],
+    [contextMenu, pushUndo, paintFog, addPing, doRevealBox, doHideBox, redrawBoxes, apiBoxDelete, pushUndoEntry, drawMap, drawTop, showNotif, slug, duplicateObject],
   );
 
   // ── Box editor callbacks ──
@@ -2682,7 +2670,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
             letterSpacing: '.06em',
           }}
         >
-          {tool.toUpperCase()} {['reveal', 'hide', 'gridReveal'].includes(tool) ? `· ${brushRadius}px` : ''}
+          {tool.toUpperCase()} {FOG_TOOLS.includes(tool) ? `· ${brushRadius}px` : ''}
         </div>
       )}
 
