@@ -22,6 +22,9 @@ export interface SessionState {
   objects: MapObject[];
 }
 
+// How long to keep session state in memory after all connections close (ms)
+const SESSION_CLEANUP_DELAY_MS = 60_000;
+
 const connections = new Map<string, SessionConnections>();
 const state = new Map<string, SessionState>();
 
@@ -58,7 +61,7 @@ export function removeConnection(slug: string, role: 'gm' | 'player', ws: WebSoc
       if (current && current.gm.size === 0 && current.players.size === 0) {
         connections.delete(slug);
       }
-    }, 60_000);
+    }, SESSION_CLEANUP_DELAY_MS);
   }
 }
 

@@ -31,7 +31,6 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 const PING_INTERVAL_MS = 30_000;
-const PONG_TIMEOUT_MS = 10_000;
 const AUTH_COOKIE_NAME = process.env.NODE_ENV === 'production'
   ? '__Secure-authjs.session-token'
   : 'authjs.session-token';
@@ -104,9 +103,10 @@ app.prepare().then(() => {
   wss.on('connection', async (ws: WebSocket, _req: http.IncomingMessage, slug: string, role: 'gm' | 'player') => {
     addConnection(slug, role, ws);
 
-    // Track pong for keepalive
-    let isAlive = true;
-    ws.on('pong', () => { isAlive = true; });
+    // Initialize keepalive tracking
+    const ext = ws as WebSocket & { _isAlive: boolean };
+    ext._isAlive = true;
+    ws.on('pong', () => { ext._isAlive = true; });
 
     // Send full state on connect
     await sendFullState(ws, slug, role);
@@ -130,37 +130,25 @@ app.prepare().then(() => {
     });
   });
 
-  // Keepalive: ping all connections every 30 seconds
+  // Keepalive: ping all connections every 30 seconds.
+  // Clients that don't respond with a pong within the next cycle are terminated.
   const pingInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
-      const ext = ws as WebSocket & { _isAlive?: boolean };
+      const ext = ws as WebSocket & { _isAlive: boolean };
       if (ext._isAlive === false) {
         ws.terminate();
         return;
       }
       ext._isAlive = false;
       ws.ping();
-      // Also send a heartbeat JSON message for client-side status indicators
+      // Also send a heartbeat JSON message for client-side connection status indicators
       try {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'heartbeat' }));
         }
-      } catch { /* ignore */ }
+      } catch { /* ignore closed socket */ }
     });
   }, PING_INTERVAL_MS);
-
-  wss.on('connection', (ws) => {
-    const ext = ws as WebSocket & { _isAlive?: boolean };
-    ext._isAlive = true;
-    ws.on('pong', () => { ext._isAlive = true; });
-
-    // Schedule pong timeout check
-    ws.on('ping', () => {
-      setTimeout(() => {
-        if (ext._isAlive === false) ws.terminate();
-      }, PONG_TIMEOUT_MS);
-    });
-  });
 
   wss.on('close', () => clearInterval(pingInterval));
 
@@ -317,6 +305,7 @@ function handleGMEvent(slug: string, _ws: WebSocket, event: WSEvent) {
           },
         }).catch((err: unknown) => console.error('[WS] camera:update persist error:', err));
       }
+      // Broadcast to players as 'camera:move' (the event type players listen for)
       broadcastPlayers(slug, { type: 'camera:move', payload });
       break;
     }

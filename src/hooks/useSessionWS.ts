@@ -26,6 +26,7 @@ interface UseSessionWSResult {
   status: WSStatus;
 }
 
+// Exponential backoff constants: starts at 1s, doubles each attempt, caps at 30s
 const BACKOFF_INITIAL = 1000;
 const BACKOFF_MAX = 30_000;
 
