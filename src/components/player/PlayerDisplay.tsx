@@ -14,54 +14,85 @@ const FS_BTN_HIDE_DELAY = 3000; // ms — auto-hide fullscreen button after inac
 interface Particle {
   x: number; y: number;
   vx: number; vy: number;
-  life: number; maxLife: number;
+  life: number; maxLife: number; // 0-1, ticks down to 0 then particle dies
   size: number;
   alpha: number;
 }
 
+// Spawn rate per effect at intensity=100 (particles per frame at 60fps)
+const SPAWN_RATE_MAX: Record<string, number> = {
+  rain: 8, snow: 3, embers: 5, mist: 1.2,
+};
+// Maximum particle cap at intensity=100
+const MAX_PARTICLES: Record<string, number> = {
+  rain: 600, snow: 200, embers: 300, mist: 30,
+};
+// Lifetime in frames at 60fps
+const PARTICLE_LIFE: Record<string, [number, number]> = {
+  rain:   [40, 70],
+  snow:   [200, 400],
+  embers: [60, 150],
+  mist:   [400, 700],
+};
+
 function spawnParticles(effect: string, intensity: number, w: number, h: number, existing: Particle[]): Particle[] {
-  const count = Math.floor((intensity / 100) * 3);
+  const ratio = intensity / 100;
+  const rate = Math.max(0.2, (SPAWN_RATE_MAX[effect] ?? 3) * ratio);
+  // Probabilistic spawn: floor + random fractional chance
+  const count = Math.floor(rate) + (Math.random() < (rate % 1) ? 1 : 0);
+  const cap = Math.max(5, Math.floor((MAX_PARTICLES[effect] ?? 200) * ratio));
+
+  if (existing.length >= cap) return existing;
+
   const particles = [...existing];
-  for (let i = 0; i < count; i++) {
+  const [minLife, maxLife] = PARTICLE_LIFE[effect] ?? [100, 200];
+
+  for (let i = 0; i < count && particles.length < cap; i++) {
+    const life = minLife + Math.random() * (maxLife - minLife);
     if (effect === 'rain') {
       particles.push({
-        x: Math.random() * w,
+        x: Math.random() * (w + 100) - 50,
         y: -20,
         vx: 2.5 + Math.random(),
         vy: 18 + Math.random() * 8,
-        life: 1, maxLife: 1,
+        life, maxLife: life,
         size: 1 + Math.random(),
         alpha: 0.4 + Math.random() * 0.3,
       });
     } else if (effect === 'snow') {
+      // 25% smaller than original (size was 2+r*3, now 1.5+r*2.25)
       particles.push({
-        x: Math.random() * w,
+        x: Math.random() * (w + 20) - 10,
         y: -10,
         vx: (Math.random() - 0.5) * 0.8,
-        vy: 1.5 + Math.random() * 1.5,
-        life: 1, maxLife: 1,
-        size: 2 + Math.random() * 3,
+        vy: 1.2 + Math.random() * 1.2,
+        life, maxLife: life,
+        size: 1.5 + Math.random() * 2.25,
         alpha: 0.5 + Math.random() * 0.4,
       });
     } else if (effect === 'embers') {
+      // Spawn at random position anywhere on canvas, drift in all directions
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.3 + Math.random() * 1.2;
       particles.push({
         x: Math.random() * w,
-        y: h + 10,
-        vx: (Math.random() - 0.5) * 1.5,
-        vy: -(1.5 + Math.random() * 2.5),
-        life: 1, maxLife: 1,
-        size: 1.5 + Math.random() * 2,
-        alpha: 0.6 + Math.random() * 0.4,
+        y: Math.random() * h,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life, maxLife: life,
+        size: 1 + Math.random() * 2,
+        alpha: 0.7 + Math.random() * 0.3,
       });
     } else if (effect === 'mist') {
+      // Spawn off left edge, drift rightward
       particles.push({
-        x: Math.random() * w - 100,
+        x: -100 - Math.random() * 200,
         y: Math.random() * h,
-        vx: 0.3 + Math.random() * 0.4,
-        vy: (Math.random() - 0.5) * 0.2,
-        life: 1, maxLife: 1,
-        size: 80 + Math.random() * 120,
-        alpha: 0.04 + Math.random() * 0.06,
+        vx: 0.2 + Math.random() * 0.35,
+        vy: (Math.random() - 0.5) * 0.15,
+        life, maxLife: life,
+        size: 120 + Math.random() * 180,
+        alpha: 0.22 + Math.random() * 0.18,
       });
     }
   }
@@ -82,44 +113,68 @@ function updateAndDrawParticles(
   for (const p of particles) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
+    p.life -= dt;
 
-    // Remove out-of-bounds
-    if (effect === 'rain' && (p.y > h + 20 || p.x > w + 20)) continue;
-    if (effect === 'snow' && p.y > h + 20) continue;
-    if (effect === 'embers' && p.y < -20) continue;
-    if (effect === 'mist' && p.x > w + 200) continue;
+    // Fade out as life approaches 0 (last 20% of life)
+    const lifeFrac = p.life / p.maxLife; // 1 = just born, 0 = dead
+    const fadeAlpha = lifeFrac < 0.2 ? (lifeFrac / 0.2) : 1;
+
+    // Remove dead or off-screen particles
+    if (p.life <= 0) continue;
+    if (effect === 'rain' && (p.y > h + 20 || p.x > w + 40)) continue;
+    if (effect === 'snow' && (p.y > h + 20 || p.x < -20 || p.x > w + 20)) continue;
+    if (effect === 'embers' && (p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20)) continue;
+    if (effect === 'mist' && p.x > w + 300) continue;
 
     ctx.save();
-    ctx.globalAlpha = p.alpha;
 
     if (effect === 'rain') {
-      ctx.strokeStyle = 'rgba(160,200,255,0.6)';
+      ctx.globalAlpha = p.alpha * fadeAlpha;
+      ctx.strokeStyle = 'rgba(160,200,255,0.7)';
       ctx.lineWidth = p.size;
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x - p.vx * 2, p.y - p.vy * 2);
+      ctx.lineTo(p.x - p.vx * 2.5, p.y - p.vy * 2.5);
       ctx.stroke();
     } else if (effect === 'snow') {
+      ctx.globalAlpha = p.alpha * fadeAlpha;
       ctx.fillStyle = 'rgba(220,240,255,0.9)';
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
+      // Gentle horizontal drift wobble
+      p.vx += (Math.random() - 0.5) * 0.04;
+      p.vx = Math.max(-1.5, Math.min(1.5, p.vx));
     } else if (effect === 'embers') {
-      const age = 1 - p.life;
-      ctx.fillStyle = age < 0.5 ? 'rgba(255,160,40,0.9)' : 'rgba(255,80,20,0.7)';
+      // Flicker: random alpha variation, slow drift change
+      const flicker = 0.6 + Math.random() * 0.4;
+      ctx.globalAlpha = p.alpha * fadeAlpha * flicker;
+      // Color shifts from yellow→orange→red as particle ages
+      const age = 1 - lifeFrac;
+      const r = 255;
+      const g = Math.round(Math.max(30, 180 - age * 160));
+      const b = Math.round(Math.max(0, 20 - age * 20));
+      ctx.fillStyle = `rgba(${r},${g},${b},0.9)`;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
-      // Flicker
-      p.alpha = (0.6 + Math.random() * 0.4) * (1 - age * 0.3);
-      p.vx += (Math.random() - 0.5) * 0.1;
+      // Gentle random drift in all directions
+      p.vx += (Math.random() - 0.5) * 0.15;
+      p.vy += (Math.random() - 0.5) * 0.15;
+      // Slight drag to prevent runaway
+      p.vx *= 0.98;
+      p.vy *= 0.98;
     } else if (effect === 'mist') {
+      // Fade in during first 20% of life too
+      const fadeIn = lifeFrac > 0.8 ? ((1 - lifeFrac) / 0.2) : 1;
+      ctx.globalAlpha = p.alpha * fadeAlpha * fadeIn;
       const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-      grad.addColorStop(0, 'rgba(200,220,255,0.15)');
-      grad.addColorStop(1, 'rgba(200,220,255,0)');
+      grad.addColorStop(0, 'rgba(210,225,255,0.5)');
+      grad.addColorStop(0.4, 'rgba(210,225,255,0.25)');
+      grad.addColorStop(1, 'rgba(210,225,255,0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.ellipse(p.x, p.y, p.size, p.size * 0.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(p.x, p.y, p.size, p.size * 0.35, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -550,12 +605,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
 
       // Spawn new particles based on intensity
       particlesRef.current = spawnParticles(effect, particleIntensityRef.current, canvas.width, canvas.height, particlesRef.current);
-
-      // Cap particle count
-      const maxParticles = Math.floor(particleIntensityRef.current * 3);
-      if (particlesRef.current.length > maxParticles) {
-        particlesRef.current = particlesRef.current.slice(-maxParticles);
-      }
 
       particlesRef.current = updateAndDrawParticles(ctx, particlesRef.current, effect, canvas.width, canvas.height, dt);
 

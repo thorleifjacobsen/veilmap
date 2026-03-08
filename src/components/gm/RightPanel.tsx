@@ -244,10 +244,12 @@ export default function RightPanel({
 
   const playAmbient = useCallback((slot: SoundSlot, vol: number) => {
     stopAmbient(true);
-    const audio = new Audio(slot.fileUrl);
+    const audio = new Audio();
+    audio.preload = 'auto';
     audio.loop = true;
-    audio.volume = Math.min(1, slot.volume * vol);
-    audio.play().catch(() => {});
+    audio.volume = Math.min(1, Math.max(0, slot.volume * vol));
+    audio.src = slot.fileUrl;
+    audio.play().catch((err) => console.warn('[Soundboard] Ambient play failed:', err));
     ambientAudioRef.current.el = audio;
     ambientAudioRef.current.slotId = slot.id;
     setPlayingAmbientId(slot.id);
@@ -255,10 +257,12 @@ export default function RightPanel({
   }, [stopAmbient, onWsSend]);
 
   const playEffect = useCallback((slot: SoundSlot, vol: number) => {
-    const audio = new Audio(slot.fileUrl);
-    audio.volume = Math.min(1, slot.volume * vol);
+    const audio = new Audio();
+    audio.preload = 'auto';
+    audio.volume = Math.min(1, Math.max(0, slot.volume * vol));
+    audio.src = slot.fileUrl;
     effectAudioSetRef.current.add(audio);
-    audio.play().catch(() => {});
+    audio.play().catch((err) => console.warn('[Soundboard] Effect play failed:', err));
     setPlayingEffects(prev => new Set(prev).add(slot.id));
     audio.onended = () => {
       effectAudioSetRef.current.delete(audio);
