@@ -71,6 +71,7 @@ export default function ContextMenu({ state, onClose, onAction }: ContextMenuPro
 
           <CxItem icon="copy" label="Duplicate" shortcut="Ctrl+D" onClick={() => onAction('duplicateObject')} />
           <CxItem icon="edit" label="Rename" onClick={() => onAction('renameObject')} />
+          <CxItem icon="ping" label="Ping location" shortcut="P" onClick={() => onAction('ping')} />
 
           <div className="my-1 h-px" style={{ background: 'rgba(200,150,62,.2)' }} />
 

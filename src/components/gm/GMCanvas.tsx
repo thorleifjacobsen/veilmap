@@ -245,6 +245,18 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
   useEffect(() => { selectedObjectIdRef.current = selectedObjectId; }, [selectedObjectId]);
   useEffect(() => { snapToGridRef.current = snapToGrid; }, [snapToGrid]);
 
+  // ── Viewport persistence (localStorage per session slug) ──
+  const vpSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveViewport = useCallback(() => {
+    if (vpSaveTimerRef.current) clearTimeout(vpSaveTimerRef.current);
+    vpSaveTimerRef.current = setTimeout(() => {
+      try {
+        const { x, y, scale } = vpRef.current;
+        localStorage.setItem(`veilmap-vp-${slug}`, JSON.stringify({ x, y, scale }));
+      } catch { /* localStorage full or unavailable */ }
+    }, 300);
+  }, [slug]);
+
   // ── Notification ──
   const notifTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const showNotif = useCallback((msg: string) => {
@@ -641,8 +653,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         ctx.save();
         applyViewport(ctx, vp);
         if (obj.locked) {
-          // Locked: dashed gray outline, no resize handles
-          ctx.strokeStyle = 'rgba(180,180,180,.5)';
+          // Locked: dashed orange outline, no resize handles
+          ctx.strokeStyle = 'rgba(224,150,50,.7)';
           ctx.lineWidth = 2 / vp.scale;
           ctx.setLineDash([6 / vp.scale, 4 / vp.scale]);
           ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
@@ -1169,7 +1181,21 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
 
     const w = wrapRef.current;
     if (w) {
-      vpRef.current = fitToContainer(MAP_W, MAP_H, w.offsetWidth, w.offsetHeight);
+      // Restore saved viewport from localStorage, or fall back to fit-to-screen
+      let restored = false;
+      try {
+        const saved = localStorage.getItem(`veilmap-vp-${slug}`);
+        if (saved) {
+          const vp = JSON.parse(saved);
+          if (typeof vp.x === 'number' && typeof vp.y === 'number' && typeof vp.scale === 'number' && vp.scale > 0) {
+            vpRef.current = { x: vp.x, y: vp.y, scale: vp.scale };
+            restored = true;
+          }
+        }
+      } catch { /* ignore parse errors */ }
+      if (!restored) {
+        vpRef.current = fitToContainer(MAP_W, MAP_H, w.offsetWidth, w.offsetHeight);
+      }
       setZoomPercent(Math.round(vpRef.current.scale * 100));
     }
 
@@ -1401,6 +1427,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         vpRef.current = zoomAt(vpRef.current, cx, cy, 1.15);
         setZoomPercent(Math.round(vpRef.current.scale * 100));
         redrawAll();
+        saveViewport();
       }
       if (e.key === '-') {
         const wrap = wrapRef.current;
@@ -1409,6 +1436,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         vpRef.current = zoomAt(vpRef.current, cx, cy, 0.87);
         setZoomPercent(Math.round(vpRef.current.scale * 100));
         redrawAll();
+        saveViewport();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -1625,6 +1653,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
           ? clampViewport(newVp, MAP_W, MAP_H, wrap.offsetWidth, wrap.offsetHeight)
           : newVp;
         redrawAll();
+        saveViewport();
         return;
       }
 
@@ -1997,8 +2026,9 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
       vpRef.current = zoomAt(vpRef.current, sx, sy, factor);
       setZoomPercent(Math.round(vpRef.current.scale * 100));
       redrawAll();
+      saveViewport();
     },
-    [redrawAll],
+    [redrawAll, saveViewport],
   );
 
   // Register wheel handler as non-passive to allow preventDefault
@@ -2023,6 +2053,12 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         if (!obj.visible) return false;
         return mp.x >= obj.x && mp.x <= obj.x + obj.w && mp.y >= obj.y && mp.y <= obj.y + obj.h;
       }) || null;
+      // Right-click selects the object (same as left-click)
+      if (clickedObject) {
+        setSelectedObjectId(clickedObject.id);
+        selectedObjectIdRef.current = clickedObject.id;
+        drawTop();
+      }
       setContextMenu({
         open: true,
         x: e.clientX,
@@ -2034,7 +2070,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
         object: clickedObject,
       });
     },
-    [getCanvasPos],
+    [getCanvasPos, drawTop],
   );
 
   // ── Context menu actions ──
@@ -2508,7 +2544,8 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
     vpRef.current = fitToContainer(MAP_W, MAP_H, w.offsetWidth, w.offsetHeight);
     setZoomPercent(Math.round(vpRef.current.scale * 100));
     redrawAll();
-  }, [redrawAll]);
+    saveViewport();
+  }, [redrawAll, saveViewport]);
 
   const handleResetFog = useCallback(() => {
     dialogConfirm('Reset Fog', 'Reset all fog? This covers the entire map.', true).then(ok => { if (ok) resetFog(); });
@@ -2899,6 +2936,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                   vpRef.current = zoomAt(vpRef.current, cx, cy, factor);
                   setZoomPercent(Math.round(vpRef.current.scale * 100));
                   redrawAll();
+                  saveViewport();
                 }}
                 className="h-48 w-3 appearance-none rounded-full"
                 style={{
@@ -2918,6 +2956,7 @@ export default function GMCanvas({ session, slug }: { session: Session; slug: st
                     vpRef.current = fitToContainer(MAP_W, MAP_H, wrap.offsetWidth, wrap.offsetHeight);
                     setZoomPercent(Math.round(vpRef.current.scale * 100));
                     redrawAll();
+                    saveViewport();
                   }}
                 >
                   Fit
