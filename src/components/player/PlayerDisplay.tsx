@@ -4,16 +4,196 @@ import React, { useRef, useEffect, useCallback, useState } from 'react';
 import type { Session, FogPaintPayload, FogSnapshotPayload, FullStatePayload, MapObject, CameraViewport, BlackoutPayload, CameraMovePayload } from '@/types';
 import { MAP_W, MAP_H, createFogCanvas, paintHide, revealBox as revealBoxFog, loadFogFromBase64, animateReveal } from '@/lib/fog-engine';
 import { applyViewport, hexToRgba, type Viewport } from '@/lib/viewport';
-import { renderAnimatedFog } from '@/lib/animated-fog';
 import PrepScreen from './PrepScreen';
 import { useSessionWS, type WSEvent } from '@/hooks/useSessionWS';
 
 const FS_BTN_HIDE_DELAY = 3000; // ms — auto-hide fullscreen button after inactivity
 
+// ── Particle system ──
+
+interface Particle {
+  x: number; y: number;
+  vx: number; vy: number;
+  life: number; maxLife: number; // 0-1, ticks down to 0 then particle dies
+  size: number;
+  alpha: number;
+}
+
+// Spawn rate per effect at intensity=100 (particles per frame at 60fps)
+const SPAWN_RATE_MAX: Record<string, number> = {
+  rain: 8, snow: 3, embers: 5, mist: 1.2,
+};
+// Maximum particle cap at intensity=100
+const MAX_PARTICLES: Record<string, number> = {
+  rain: 600, snow: 200, embers: 300, mist: 30,
+};
+// Lifetime in frames at 60fps
+const PARTICLE_LIFE: Record<string, [number, number]> = {
+  rain:   [40, 70],
+  snow:   [200, 400],
+  embers: [60, 150],
+  mist:   [400, 700],
+};
+
+function spawnParticles(effect: string, intensity: number, w: number, h: number, existing: Particle[]): Particle[] {
+  const ratio = intensity / 100;
+  const rate = Math.max(0.2, (SPAWN_RATE_MAX[effect] ?? 3) * ratio);
+  // Probabilistic spawn: floor + random fractional chance
+  const count = Math.floor(rate) + (Math.random() < (rate % 1) ? 1 : 0);
+  const cap = Math.max(5, Math.floor((MAX_PARTICLES[effect] ?? 200) * ratio));
+
+  if (existing.length >= cap) return existing;
+
+  const particles = [...existing];
+  const [minLife, maxLife] = PARTICLE_LIFE[effect] ?? [100, 200];
+
+  for (let i = 0; i < count && particles.length < cap; i++) {
+    const life = minLife + Math.random() * (maxLife - minLife);
+    if (effect === 'rain') {
+      particles.push({
+        x: Math.random() * (w + 100) - 50,
+        y: -20,
+        vx: 2.5 + Math.random(),
+        vy: 18 + Math.random() * 8,
+        life, maxLife: life,
+        size: 1 + Math.random(),
+        alpha: 0.4 + Math.random() * 0.3,
+      });
+    } else if (effect === 'snow') {
+      // 25% smaller than original (size was 2+r*3, now 1.5+r*2.25)
+      particles.push({
+        x: Math.random() * (w + 20) - 10,
+        y: -10,
+        vx: (Math.random() - 0.5) * 0.8,
+        vy: 1.2 + Math.random() * 1.2,
+        life, maxLife: life,
+        size: 1.5 + Math.random() * 2.25,
+        alpha: 0.5 + Math.random() * 0.4,
+      });
+    } else if (effect === 'embers') {
+      // Spawn at random position anywhere on canvas, drift in all directions
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.3 + Math.random() * 1.2;
+      particles.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life, maxLife: life,
+        size: 1 + Math.random() * 2,
+        alpha: 0.7 + Math.random() * 0.3,
+      });
+    } else if (effect === 'mist') {
+      // Spawn off left edge, drift rightward
+      particles.push({
+        x: -100 - Math.random() * 200,
+        y: Math.random() * h,
+        vx: 0.2 + Math.random() * 0.35,
+        vy: (Math.random() - 0.5) * 0.15,
+        life, maxLife: life,
+        size: 120 + Math.random() * 180,
+        alpha: 0.22 + Math.random() * 0.18,
+      });
+    }
+  }
+  return particles;
+}
+
+function updateAndDrawParticles(
+  ctx: CanvasRenderingContext2D,
+  particles: Particle[],
+  effect: string,
+  w: number,
+  h: number,
+  dt: number
+): Particle[] {
+  ctx.clearRect(0, 0, w, h);
+  const alive: Particle[] = [];
+
+  for (const p of particles) {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+
+    // Fade out as life approaches 0 (last 20% of life)
+    const lifeFrac = p.life / p.maxLife; // 1 = just born, 0 = dead
+    const fadeAlpha = lifeFrac < 0.2 ? (lifeFrac / 0.2) : 1;
+
+    // Remove dead or off-screen particles
+    if (p.life <= 0) continue;
+    if (effect === 'rain' && (p.y > h + 20 || p.x > w + 40)) continue;
+    if (effect === 'snow' && (p.y > h + 20 || p.x < -20 || p.x > w + 20)) continue;
+    if (effect === 'embers' && (p.x < -20 || p.x > w + 20 || p.y < -20 || p.y > h + 20)) continue;
+    if (effect === 'mist' && p.x > w + 300) continue;
+
+    ctx.save();
+
+    if (effect === 'rain') {
+      ctx.globalAlpha = p.alpha * fadeAlpha;
+      ctx.strokeStyle = 'rgba(160,200,255,0.7)';
+      ctx.lineWidth = p.size;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - p.vx * 2.5, p.y - p.vy * 2.5);
+      ctx.stroke();
+    } else if (effect === 'snow') {
+      ctx.globalAlpha = p.alpha * fadeAlpha;
+      ctx.fillStyle = 'rgba(220,240,255,0.9)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      // Gentle horizontal drift wobble
+      p.vx += (Math.random() - 0.5) * 0.04;
+      p.vx = Math.max(-1.5, Math.min(1.5, p.vx));
+    } else if (effect === 'embers') {
+      // Flicker: random alpha variation, slow drift change
+      const flicker = 0.6 + Math.random() * 0.4;
+      ctx.globalAlpha = p.alpha * fadeAlpha * flicker;
+      // Color shifts from yellow→orange→red as particle ages
+      const age = 1 - lifeFrac;
+      const r = 255;
+      const g = Math.round(Math.max(30, 180 - age * 160));
+      const b = Math.round(Math.max(0, 20 - age * 20));
+      ctx.fillStyle = `rgba(${r},${g},${b},0.9)`;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      // Gentle random drift in all directions
+      p.vx += (Math.random() - 0.5) * 0.15;
+      p.vy += (Math.random() - 0.5) * 0.15;
+      // Slight drag to prevent runaway
+      p.vx *= 0.98;
+      p.vy *= 0.98;
+    } else if (effect === 'mist') {
+      // Fade in during first 20% of life too
+      const fadeIn = lifeFrac > 0.8 ? ((1 - lifeFrac) / 0.2) : 1;
+      ctx.globalAlpha = p.alpha * fadeAlpha * fadeIn;
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+      grad.addColorStop(0, 'rgba(210,225,255,0.5)');
+      grad.addColorStop(0.4, 'rgba(210,225,255,0.25)');
+      grad.addColorStop(1, 'rgba(210,225,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.size, p.size * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+    alive.push(p);
+  }
+
+  return alive;
+}
+
+// Ambient fade-out: 20 steps × 50ms = 1s total (matches GM-side)
+const FADE_STEPS = 20;
+const FADE_STEP_MS = 50;
+
 export default function PlayerDisplay({ slug }: { slug: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasBgRef = useRef<HTMLCanvasElement>(null);
   const canvasFogRef = useRef<HTMLCanvasElement>(null);
+  const canvasParticleRef = useRef<HTMLCanvasElement>(null);
   const fogCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mapImageRef = useRef<HTMLImageElement | null>(null);
   const vpRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
@@ -24,7 +204,12 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   const objectImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const pingsRef = useRef<Array<{ x: number; y: number; born: number }>>([]);
   const gridRef = useRef<{ show: boolean; size: number; color: string; opacity: number }>({ show: false, size: 32, color: '#c8963e', opacity: 0.25 });
-  const fogStyleRef = useRef<'solid' | 'animated'>('solid');
+  const particleEffectRef = useRef<string>('none');
+  const particleIntensityRef = useRef<number>(50);
+  const particleRafRef = useRef<number>(0);
+  const particlesRef = useRef<Particle[]>([]);
+  // Track player-side ambient audio so we can stop it via audio:stop event
+  const playerAmbientRef = useRef<HTMLAudioElement | null>(null);
   const [prepMode, setPrepMode] = useState(false);
   const [prepMessage, setPrepMessage] = useState('Preparing next scene…');
   const [sessionName, setSessionName] = useState('');
@@ -162,10 +347,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
     applyViewport(ctxFog, vp);
     ctxFog.globalAlpha = 1.0;
     ctxFog.drawImage(fogCanvas, 0, 0);
-    // Animated fog overlay
-    if (fogStyleRef.current === 'animated') {
-      renderAnimatedFog(ctxFog, fogCanvas, Date.now() / 1000, MAP_W, MAP_H);
-    }
     ctxFog.globalAlpha = 1;
 
     // Draw grid above fog so it's always visible
@@ -270,10 +451,6 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
         // Set blackout
         const bl = (p as FullStatePayload & { blackout?: BlackoutPayload }).blackout;
         if (bl) setBlackout(bl);
-        // Set fog style
-        if (p.session.fog_style) {
-          fogStyleRef.current = p.session.fog_style as 'solid' | 'animated';
-        }
         break;
       }
       case 'fog:paint': {
@@ -369,8 +546,64 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
         break;
       }
       case 'fog:style': {
-        const p = event.payload as { style: string };
-        fogStyleRef.current = (p.style === 'animated') ? 'animated' : 'solid';
+        // Animated fog removed — no-op for backward compatibility
+        break;
+      }
+      case 'session:settings': {
+        const p = event.payload as { environment?: { particleEffect?: string; particleIntensity?: number; showOnGM?: boolean } };
+        if (p.environment) {
+          if (p.environment.particleEffect !== undefined) particleEffectRef.current = p.environment.particleEffect;
+          if (p.environment.particleIntensity !== undefined) particleIntensityRef.current = p.environment.particleIntensity;
+          // Reset particles on effect change
+          particlesRef.current = [];
+        }
+        break;
+      }
+      case 'audio:play': {
+        const p = event.payload as { url: string; volume: number; loop: boolean };
+        if (p.url) {
+          if (p.loop) {
+            // Stop any existing ambient before starting the new one
+            if (playerAmbientRef.current) {
+              playerAmbientRef.current.pause();
+              playerAmbientRef.current.currentTime = 0;
+              playerAmbientRef.current = null;
+            }
+            const audio = new Audio();
+            audio.preload = 'auto';
+            audio.volume = Math.min(1, Math.max(0, p.volume ?? 1));
+            audio.loop = true;
+            audio.src = p.url;
+            audio.play().catch(() => {});
+            playerAmbientRef.current = audio;
+          } else {
+            const audio = new Audio();
+            audio.preload = 'auto';
+            audio.volume = Math.min(1, Math.max(0, p.volume ?? 1));
+            audio.src = p.url;
+            audio.play().catch(() => {});
+            // No cleanup needed for one-shot audio — GC collects it after playback
+          }
+        }
+        break;
+      }
+      case 'audio:stop': {
+        // Stop player-side ambient audio with a short fade-out
+        const ambient = playerAmbientRef.current;
+        if (ambient) {
+          playerAmbientRef.current = null;
+          const startVol = ambient.volume;
+          let step = 0;
+          const interval = setInterval(() => {
+            step++;
+            ambient.volume = Math.max(0, startVol * (1 - step / FADE_STEPS));
+            if (step >= FADE_STEPS) {
+              ambient.pause();
+              ambient.currentTime = 0;
+              clearInterval(interval);
+            }
+          }, FADE_STEP_MS);
+        }
         break;
       }
       case 'display:shake': {
@@ -389,6 +622,56 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
   });
 
   const connected = wsStatus === 'connected';
+
+  // Particle animation loop
+  useEffect(() => {
+    let lastTime = performance.now();
+
+    const animate = () => {
+      const canvas = canvasParticleRef.current;
+      if (!canvas) { particleRafRef.current = requestAnimationFrame(animate); return; }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { particleRafRef.current = requestAnimationFrame(animate); return; }
+
+      const now = performance.now();
+      const dt = Math.min((now - lastTime) / 16.67, 3); // normalized delta, capped
+      lastTime = now;
+
+      const effect = particleEffectRef.current;
+      if (effect === 'none') {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particlesRef.current = [];
+        particleRafRef.current = requestAnimationFrame(animate);
+        return;
+      }
+
+      // Spawn new particles based on intensity
+      particlesRef.current = spawnParticles(effect, particleIntensityRef.current, canvas.width, canvas.height, particlesRef.current);
+
+      particlesRef.current = updateAndDrawParticles(ctx, particlesRef.current, effect, canvas.width, canvas.height, dt);
+
+      particleRafRef.current = requestAnimationFrame(animate);
+    };
+
+    particleRafRef.current = requestAnimationFrame(animate);
+    return () => { cancelAnimationFrame(particleRafRef.current); };
+  }, []);
+
+  // Resize particle canvas with container
+  useEffect(() => {
+    const resize = () => {
+      const container = containerRef.current;
+      const canvas = canvasParticleRef.current;
+      if (!container || !canvas) return;
+      const { width, height } = container.getBoundingClientRect();
+      canvas.width = width;
+      canvas.height = height;
+    };
+    resize();
+    const ro = new ResizeObserver(resize);
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   // Fullscreen toggle
   const toggleFullscreen = useCallback(() => {
@@ -493,6 +776,8 @@ export default function PlayerDisplay({ slug }: { slug: string }) {
       </div>
       {/* Fog/overlay canvas — fog, grid, pings */}
       <canvas ref={canvasFogRef} className="absolute inset-0 w-full h-full block pointer-events-none" style={{ zIndex: 3 }} />
+      {/* Particle effects canvas — above fog */}
+      <canvas ref={canvasParticleRef} className="absolute inset-0 w-full h-full block pointer-events-none" style={{ zIndex: 4 }} />
       {/* Blackout overlay */}
       {blackout?.active && (
         <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
+import type { SessionExport } from '@/types';
 
 interface SettingsModalProps {
   open: boolean;
@@ -13,8 +14,8 @@ interface SettingsModalProps {
   onPrepMessageChange: (v: string) => void;
   sessionName: string;
   onSessionNameChange: (v: string) => void;
-  fogStyle: 'solid' | 'animated';
-  onFogStyleChange: (v: 'solid' | 'animated') => void;
+  onExport: () => void;
+  onImport: (data: SessionExport) => void;
 }
 
 export default function SettingsModal({
@@ -28,9 +29,29 @@ export default function SettingsModal({
   onPrepMessageChange,
   sessionName,
   onSessionNameChange,
-  fogStyle,
-  onFogStyleChange,
+  onExport,
+  onImport,
 }: SettingsModalProps) {
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target?.result as string) as SessionExport;
+          onImport(data);
+        } catch {
+          /* ignore invalid files */
+        }
+      };
+      reader.readAsText(f);
+      e.target.value = '';
+    },
+    [onImport],
+  );
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent) => {
       if (e.target === e.currentTarget) onClose();
@@ -99,33 +120,6 @@ export default function SettingsModal({
             />
           </SettingsSection>
 
-          <SettingsSection title="Fog Style">
-            <div className="flex items-center gap-2">
-              {(['solid', 'animated'] as const).map((style) => (
-                <button
-                  key={style}
-                  className="flex-1 rounded border px-3 py-1.5 text-[.62rem] tracking-[.06em] transition-all"
-                  style={{
-                    fontFamily: "'Cinzel',serif",
-                    borderColor: fogStyle === style ? '#c8963e' : 'rgba(200,150,62,.2)',
-                    background: fogStyle === style ? 'rgba(200,150,62,.15)' : 'transparent',
-                    color: fogStyle === style ? '#c8963e' : 'rgba(212,196,160,.4)',
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => onFogStyleChange(style)}
-                >
-                  {style === 'solid' ? '▪ Solid' : '≈ Animated'}
-                </button>
-              ))}
-            </div>
-            <div
-              className="mt-1.5 text-[.52rem]"
-              style={{ fontFamily: "'Crimson Pro',serif", color: 'rgba(212,196,160,.3)' }}
-            >
-              Animated fog adds a slow-moving mist effect. Auto-disables on low performance.
-            </div>
-          </SettingsSection>
-
           {/* Prep Mode section */}
           <SettingsSection title="Prep Mode Screen">
             <div className="mb-2.5">
@@ -171,6 +165,43 @@ export default function SettingsModal({
                   fontFamily: "'Crimson Pro',serif",
                 }}
               />
+            </div>
+          </SettingsSection>
+
+          {/* Session Data (Export/Import) */}
+          <SettingsSection title="Session Data">
+            <div className="flex flex-col gap-1.5">
+              <button
+                className="w-full cursor-pointer rounded border p-1.5 text-[.64rem] tracking-[.07em] transition-colors hover:bg-[rgba(200,150,62,.18)]"
+                style={{
+                  fontFamily: "'Cinzel',serif",
+                  borderColor: 'rgba(200,150,62,.2)',
+                  color: '#c8963e',
+                  background: 'rgba(200,150,62,.07)',
+                }}
+                onClick={onExport}
+              >
+                ↓ Export .veilmap.json
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".json,.veilmap.json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+              <button
+                className="w-full cursor-pointer rounded border p-1.5 text-[.64rem] tracking-[.07em] transition-colors hover:bg-[rgba(200,150,62,.18)]"
+                style={{
+                  fontFamily: "'Cinzel',serif",
+                  borderColor: 'rgba(200,150,62,.2)',
+                  color: '#c8963e',
+                  background: 'rgba(200,150,62,.07)',
+                }}
+                onClick={() => importInputRef.current?.click()}
+              >
+                ↑ Import .veilmap.json
+              </button>
             </div>
           </SettingsSection>
         </div>

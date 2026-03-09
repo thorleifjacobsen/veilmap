@@ -1,12 +1,21 @@
 'use client';
 
+import { useState, useRef, useEffect } from 'react';
+
 type ToolName = 'reveal' | 'hide' | 'gridReveal' | 'box' | 'select' | 'ping' | 'measure' | 'camera';
+export type FogSubTool = 'brush' | 'grid' | 'rectangle';
 
 const BRUSH_MULTIPLIERS = [
   { mult: 1, label: 'S', dotSize: 8, key: '1' },
   { mult: 2, label: 'M', dotSize: 13, key: '2' },
   { mult: 4, label: 'L', dotSize: 19, key: '3' },
   { mult: 8, label: 'XL', dotSize: 26, key: '4' },
+];
+
+const SUB_TOOL_OPTIONS: { value: FogSubTool; label: string; icon: string; hint: string }[] = [
+  { value: 'brush', label: 'Brush', icon: '○', hint: 'Freehand circular brush (B)' },
+  { value: 'grid', label: 'Grid', icon: '▦', hint: 'Snap to grid cells (G)' },
+  { value: 'rectangle', label: 'Rect', icon: '▭', hint: 'Rectangle selection (X)' },
 ];
 
 interface ToolbarProps {
@@ -24,6 +33,10 @@ interface ToolbarProps {
   snapToGrid?: boolean;
   onSnapToGridToggle?: () => void;
   onShake?: () => void;
+  revealSubTool?: FogSubTool;
+  onRevealSubToolChange?: (st: FogSubTool) => void;
+  hideSubTool?: FogSubTool;
+  onHideSubToolChange?: (st: FogSubTool) => void;
 }
 
 export default function Toolbar({
@@ -39,11 +52,42 @@ export default function Toolbar({
   onGridRightClick,
   onMeasureRightClick,
   onShake,
+  revealSubTool = 'brush',
+  onRevealSubToolChange,
+  hideSubTool = 'brush',
+  onHideSubToolChange,
 }: ToolbarProps) {
   const brushSizes = BRUSH_MULTIPLIERS.map(b => ({
     ...b,
     radius: Math.round(b.mult * gridSize / 2),
   }));
+
+  const [popover, setPopover] = useState<{ tool: 'reveal' | 'hide'; x: number; y: number } | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Close popover on outside click
+  useEffect(() => {
+    if (!popover) return;
+    const close = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setPopover(null);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [popover]);
+
+  const openPopover = (e: React.MouseEvent, tool: 'reveal' | 'hide') => {
+    e.preventDefault();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPopover({ tool, x: rect.right + 4, y: rect.top });
+  };
+
+  const getSubToolIcon = (tool: 'reveal' | 'hide') => {
+    const st = tool === 'reveal' ? revealSubTool : hideSubTool;
+    return SUB_TOOL_OPTIONS.find(o => o.value === st)?.icon ?? '○';
+  };
+
   return (
     <div
       className="flex w-[62px] flex-shrink-0 flex-col items-center gap-px py-1.5"
@@ -60,6 +104,8 @@ export default function Toolbar({
           kbd="R"
           active={activeTool === 'reveal'}
           onClick={() => onToolChange('reveal')}
+          onContextMenu={(e) => openPopover(e, 'reveal')}
+          indicator={getSubToolIcon('reveal')}
         />
         <ToolBtn
           icon={<EyeOffIcon />}
@@ -67,13 +113,8 @@ export default function Toolbar({
           kbd="H"
           active={activeTool === 'hide'}
           onClick={() => onToolChange('hide')}
-        />
-        <ToolBtn
-          icon={<GridRevealIcon />}
-          label="Grid Reveal"
-          kbd="V"
-          active={activeTool === 'gridReveal'}
-          onClick={() => onToolChange('gridReveal')}
+          onContextMenu={(e) => openPopover(e, 'hide')}
+          indicator={getSubToolIcon('hide')}
         />
         <ToolBtn
           icon={<ResetIcon />}
@@ -89,30 +130,32 @@ export default function Toolbar({
         />
       </ToolGroup>
 
-      {/* Brush size group */}
-      <ToolGroup label="Size">
-        <div className="flex flex-col items-center gap-1">
-          {brushSizes.map((b) => (
-            <div
-              key={b.key}
-              className="flex items-center justify-center cursor-pointer"
-              onClick={() => onBrushChange(b.radius)}
-              title={`${b.label} — ${b.mult}× grid (Key: ${b.key})`}
-            >
+      {/* Brush size group — only show for brush sub-tool */}
+      {(activeTool === 'reveal' ? revealSubTool : hideSubTool) !== 'grid' && (
+        <ToolGroup label="Size">
+          <div className="flex flex-col items-center gap-1">
+            {brushSizes.map((b) => (
               <div
-                className="flex-shrink-0 rounded-full transition-all"
-                style={{
-                  width: b.dotSize,
-                  height: b.dotSize,
-                  background: brushRadius === b.radius ? '#c8963e' : '#d4c4a0',
-                  opacity: brushRadius === b.radius ? 1 : 0.3,
-                  border: brushRadius === b.radius ? '1.5px solid #c8963e' : '1.5px solid transparent',
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      </ToolGroup>
+                key={b.key}
+                className="flex items-center justify-center cursor-pointer"
+                onClick={() => onBrushChange(b.radius)}
+                title={`${b.label} — ${b.mult}× grid (Key: ${b.key})`}
+              >
+                <div
+                  className="flex-shrink-0 rounded-full transition-all"
+                  style={{
+                    width: b.dotSize,
+                    height: b.dotSize,
+                    background: brushRadius === b.radius ? '#c8963e' : '#d4c4a0',
+                    opacity: brushRadius === b.radius ? 1 : 0.3,
+                    border: brushRadius === b.radius ? '1.5px solid #c8963e' : '1.5px solid transparent',
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        </ToolGroup>
+      )}
 
       {/* Boxes group */}
       <ToolGroup label="Boxes">
@@ -177,6 +220,43 @@ export default function Toolbar({
           onContextMenu={onGridRightClick ? (e) => { e.preventDefault(); onGridRightClick(e); } : undefined}
         />
       </ToolGroup>
+
+      {/* Sub-tool popover */}
+      {popover && (
+        <div
+          ref={popoverRef}
+          className="fixed z-[500] rounded border py-1 shadow-lg"
+          style={{ left: popover.x, top: popover.y, background: '#0c0b13', borderColor: 'rgba(200,150,62,.35)', minWidth: 130 }}
+        >
+          <div className="px-3 py-1 text-[.5rem] uppercase tracking-[.1em] mb-0.5" style={{ fontFamily: "'Cinzel',serif", color: 'rgba(212,196,160,.4)' }}>
+            {popover.tool === 'reveal' ? 'Reveal' : 'Hide'} sub-tool
+          </div>
+          {SUB_TOOL_OPTIONS.map(opt => {
+            const active = popover.tool === 'reveal' ? revealSubTool === opt.value : hideSubTool === opt.value;
+            return (
+              <div
+                key={opt.value}
+                className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[.68rem] transition-all hover:bg-[rgba(200,150,62,.1)]"
+                style={{ fontFamily: "'Cinzel',serif", color: active ? '#c8963e' : '#d4c4a0' }}
+                onClick={() => {
+                  if (popover.tool === 'reveal') {
+                    onRevealSubToolChange?.(opt.value);
+                    onToolChange('reveal');
+                  } else {
+                    onHideSubToolChange?.(opt.value);
+                    onToolChange('hide');
+                  }
+                  setPopover(null);
+                }}
+              >
+                <span className="text-base">{opt.icon}</span>
+                <span>{opt.label}</span>
+                {active && <span className="ml-auto">✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -205,6 +285,7 @@ function ToolBtn({
   active,
   onClick,
   onContextMenu,
+  indicator,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -212,6 +293,7 @@ function ToolBtn({
   active: boolean;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
+  indicator?: string;
 }) {
   return (
     <button
@@ -223,7 +305,7 @@ function ToolBtn({
       }}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      title={kbd ? `${label} (${kbd})` : label}
+      title={kbd ? `${label} (${kbd})${onContextMenu ? '\nRight-click for sub-tools' : ''}` : label}
     >
       {icon}
       <span
@@ -232,6 +314,14 @@ function ToolBtn({
       >
         {label}
       </span>
+      {indicator && (
+        <span
+          className="absolute bottom-0.5 right-0.5 text-[.5rem] leading-none"
+          style={{ color: active ? '#c8963e' : 'rgba(212,196,160,.4)' }}
+        >
+          {indicator}
+        </span>
+      )}
     </button>
   );
 }
@@ -332,19 +422,6 @@ function GridIcon() {
       <rect x="14" y="3" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
       <rect x="14" y="14" width="7" height="7" />
-    </svg>
-  );
-}
-
-function GridRevealIcon() {
-  return (
-    <svg {...svgProps}>
-      <rect x="3" y="3" width="8" height="8" rx="0.5" />
-      <rect x="13" y="3" width="8" height="8" rx="0.5" />
-      <rect x="3" y="13" width="8" height="8" rx="0.5" />
-      <rect x="13" y="13" width="8" height="8" rx="0.5" />
-      <circle cx="17" cy="17" r="3" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M14 17s1.2-2 3-2 3 2 3 2-1.2 2-3 2-3-2-3-2z" fill="none" stroke="currentColor" strokeWidth="1" />
     </svg>
   );
 }
